@@ -4,41 +4,42 @@ const { TextProcessor } = require('../utils/TextProcessor');
 const { FileHandler } = require('../utils/FileHandler');
 const { FieldExtractor } = require('./pdfFieldExtractor');
 
-
 class PdfParserService {
     constructor(textProcessor, fileHandler, fieldExtractor) {
         this.textProcessor = textProcessor;
         this.fileHandler = fileHandler;
         this.fieldExtractor = fieldExtractor;
         
-        // Define special characters that need escape sequences
-        this.specialCharsMap = {
-            '"': '\\"',
-            '\\': '\\\\',
-            '\b': '\\b',
-            '\f': '\\f',
-            '\n': '\\n',
-            '\r': '\\r',
-            '\t': '\\t',
-            '\v': '\\v',
-            '-': '-\\'
+        // Characters to be treated as text in Hebrew with their escape sequences
+        this.textFlowChars = {
+            '(': '\u200e(\u200f',
+            ')': '\u200e)\u200f',
+            ',': '\u200e,\u200f',
+            '.': '\u200e.\u200f',
+            '"': '\u200e"\u200f',
+            "'": "\u200e'\u200f"
         };
     }
 
-    escapeSpecialChars(str) {
-        return str.replace(/[\\"\\\b\f\n\r\t\v-]/g, char => this.specialCharsMap[char] || char);
+    containsHebrew(str) {
+        return /[\u0590-\u05FF]/.test(str);
     }
 
     processTextItem(item) {
-        // Check if the text contains special characters
-        const hasSpecialChars = /[\\"\/\b\f\n\r\t\v]/.test(item.str);
+        if (!item.str) return '';
         
-        if (hasSpecialChars) {
-            // Escape special characters while preserving the original text structure
-            return this.escapeSpecialChars(item.str);
+        if (this.containsHebrew(item.str)) {
+            let result = '';
+            for (let char of item.str) {
+                if (char in this.textFlowChars) {
+                    result += this.textFlowChars[char];
+                } else {
+                    result += char;
+                }
+            }
+            return result;
         }
         
-        // If no special characters, return the original string
         return item.str;
     }
 
@@ -55,9 +56,6 @@ class PdfParserService {
                 
                 for (let item of textContent.items) {
                     const processedText = this.processTextItem(item);
-                    if(processedText.includes('"')){
-                        console.log('item',item)
-                    }
                     if (lastY == item.transform[5] || !lastY) {
                         // Same line - accumulate text
                         currentLine.push(processedText);
@@ -77,7 +75,7 @@ class PdfParserService {
                     text += currentLine.join('');
                 }
 
-                // Process Hebrew text while preserving escaped special characters
+                // Process Hebrew text while preserving the escape sequences
                 return this.textProcessor.reverseHebrewText(text);
             });
     }
@@ -111,7 +109,7 @@ class PdfParserService {
                 pagerender: this.render_page.bind(this)
             };
 
-            const pdfData = await pdf(dataBuffer, options);
+            const pdfData = await pdfParse(dataBuffer, options);
             return pdfData.text;
         } catch (error) {
             console.error('Error extracting raw text:', error);
