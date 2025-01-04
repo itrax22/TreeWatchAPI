@@ -3,6 +3,7 @@ const pdfParse = require('pdf-parse');
 const { TextProcessor } = require('../utils/TextProcessor');
 const { FileHandler } = require('../utils/FileHandler');
 const { FieldExtractor } = require('./pdfFieldExtractor');
+const { version } = require('os');
 
 class PdfParserService {
     constructor(textProcessor, fileHandler, fieldExtractor) {

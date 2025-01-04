@@ -53,3 +53,31 @@ Thumbs.db
 # Temporary files
 temp/
 tmp/
+
+# Local Terraform state
+*.tfstate
+*.tfstate.*
+
+# Crash log files
+crash.log
+
+# Ignore Terraform variable override files
+# These files are usually used to override variables and should not be shared
+*.tfvars
+*.tfvars.json
+
+# Ignore Terraform execution plan files
+*.tfplan
+
+# Ignore the .terraform directory and its contents
+.terraform/
+
+# Ignore backup files created by Terraform
+*.backup
+
+# Ignore sensitive data files (optional, based on your workflow)
+secrets.auto.tfvars
+
+# Ignore CLI configuration files
+.terraformrc
+terraform.rc
