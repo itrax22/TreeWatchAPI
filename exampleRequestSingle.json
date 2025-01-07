@@ -1,0 +1,27 @@
+{
+    "status": "OK",
+    "data": {
+        "id": 67631,
+        "permit_number": "4046",
+        "action": "כריתה",
+        "person_request_name": " נתיבי ישראל בע\"מ",
+        "approver_name": "צור אבלס",
+        "approver_title": "פקיד יערות גליל גולן",
+        "reason_short": "בניה",
+        "reason_detailed": "פיתוח נתיבי מטרונית",
+        "place": "מטה אשר (מ.א.)",
+        "street": "צומת עין המפרץ",
+        "street_number": null,
+        "gush": "10524",
+        "helka": "38",
+        "permit_issue_date": "2024-12-22T08:00:00.000Z",
+        "start_date": "2025-01-06T08:00:00.000Z",
+        "end_date": "2025-05-05T20:00:00.000Z",
+        "updated_at": "2024-12-22T20:23:23.000Z",
+        "trees_per_permit": {
+            "תמר מצוי-דקל": 2
+        },
+        "total_trees": 2,
+        "tree_permit_url": null
+    }
+}

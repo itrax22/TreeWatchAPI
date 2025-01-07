@@ -53,7 +53,7 @@ Thumbs.db
 # Temporary files
 temp/
 tmp/
-
+output/
 # Local Terraform state
 *.tfstate
 *.tfstate.*
@@ -81,3 +81,6 @@ secrets.auto.tfvars
 # Ignore CLI configuration files
 .terraformrc
 terraform.rc
+
+*.pdf
+service-account.json

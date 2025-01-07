@@ -1,0 +1,110 @@
+{
+    "status": "OK",
+    "data": [
+        {
+            "id": 78453,
+            "permit_number": "5723",
+            "action": "כריתה",
+            "person_request_name": "עיריית חיפה",
+            "approver_name": "דני רז",
+            "approver_title": "פקיד יערות כרמל",
+            "reason_short": "שדרוג תשתיות",
+            "reason_detailed": "פרויקט לשיפור ניקוז ברחוב",
+            "place": "חיפה",
+            "street": "רחוב בן גוריון",
+            "street_number": 12,
+            "gush": "10987",
+            "helka": "4",
+            "permit_issue_date": "2024-11-10T08:00:00.000Z",
+            "start_date": "2025-01-10T08:00:00.000Z",
+            "end_date": "2025-04-10T20:00:00.000Z",
+            "updated_at": "2024-11-10T15:45:33.000Z",
+            "trees_per_permit": {
+                "ברוש מצוי": 3,
+                "שקד מצוי": 1
+            },
+            "total_trees": 4,
+            "tree_permit_url": null
+        },
+        {
+            "id": 91234,
+            "permit_number": "6639",
+            "action": "העתקה",
+            "person_request_name": "רכבת ישראל בע\"מ",
+            "approver_name": "עידן כהן",
+            "approver_title": "פקיד יערות מרכז",
+            "reason_short": "פיתוח",
+            "reason_detailed": "בניית תחנת רכבת חדשה",
+            "place": "קריית אונו",
+            "street": "דרך העצמאות",
+            "street_number": 5,
+            "gush": "30618",
+            "helka": "7",
+            "permit_issue_date": "2024-12-01T08:00:00.000Z",
+            "start_date": "2025-01-15T08:00:00.000Z",
+            "end_date": "2025-06-30T20:00:00.000Z",
+            "updated_at": "2024-12-01T12:12:12.000Z",
+            "trees_per_permit": {
+                "אקליפטוס מקור": 5,
+                "אורן ירושלמי": 2
+            },
+            "total_trees": 7,
+            "tree_permit_url": null
+        },
+        {
+            "id": 45678,
+            "permit_number": "8892",
+            "action": "כריתה",
+            "person_request_name": "קיבוץ גבעת חיים",
+            "approver_name": "שרון לוי",
+            "approver_title": "פקיד יערות השרון",
+            "reason_short": "חקלאות",
+            "reason_detailed": "פינוי שטח לנטיעה חקלאית",
+            "place": "גבעת חיים",
+            "street": "קיבוץ",
+            "street_number": null,
+            "gush": "45876",
+            "helka": "3",
+            "permit_issue_date": "2024-12-15T08:00:00.000Z",
+            "start_date": "2025-02-01T08:00:00.000Z",
+            "end_date": "2025-03-31T20:00:00.000Z",
+            "updated_at": "2024-12-15T16:00:00.000Z",
+            "trees_per_permit": {
+                "שיטה מכחילה": 8
+            },
+            "total_trees": 8,
+            "tree_permit_url": null
+        },
+        {
+            "id": 56789,
+            "permit_number": "9910",
+            "action": "העתקה",
+            "person_request_name": "מועצה אזורית דרום השרון",
+            "approver_name": "יוסי בר",
+            "approver_title": "פקיד יערות דרום",
+            "reason_short": "שדרוג תשתיות",
+            "reason_detailed": "פרויקט הרחבת כבישים",
+            "place": "כפר סבא",
+            "street": "דרך רעננה",
+            "street_number": 34,
+            "gush": "30456",
+            "helka": "12",
+            "permit_issue_date": "2024-12-20T08:00:00.000Z",
+            "start_date": "2025-01-20T08:00:00.000Z",
+            "end_date": "2025-06-20T20:00:00.000Z",
+            "updated_at": "2024-12-20T10:20:30.000Z",
+            "trees_per_permit": {
+                "חרוב מצוי": 2,
+                "זית אירופי": 1
+            },
+            "total_trees": 3,
+            "tree_permit_url": null
+        }
+    ],
+    "pagination": {
+        "page": 1,
+        "pageSize": 4,
+        "rowCount": 50028,
+        "pageCount": 2502
+    }
+}

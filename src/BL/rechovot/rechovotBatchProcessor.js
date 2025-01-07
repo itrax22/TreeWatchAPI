@@ -1,5 +1,9 @@
 const {fieldMappings, replaceHebrewKeysWithEnglish, mappedToEnglish} = require('../../config/pdfFieldMappings');
+const {mapToTreePermitModel} = require('./mappers/dalMapper');
 const fs = require('fs').promises;
+const TreePermit = require('../../DAL/models/treePermit');
+const TreePermitRepository = require('../../DAL/repositories/treePermitRepository');
+
 class RechovotBatchProcessor {
     constructor(pdfDownloader, fileManager, pdfParser, batchSize) {
         this.pdfDownloader = pdfDownloader;
@@ -40,10 +44,22 @@ class RechovotBatchProcessor {
             }
 
             const { jsonData, rawText } = await this._parsePdfContent(pdf, tempFilePath, errors);
+            //Fix to download if the link is broken in some cases
+            const combinedData = {
+                ...pdf,
+                pdfData: {...jsonData}
+            };
+
+            const mappedData = mapToTreePermitModel(combinedData);
+            const treePermitInstance = new TreePermit(mappedData);
+
+            await TreePermitRepository.insert(treePermitInstance);
 
             if (jsonData || rawText) {
                 await this._saveResults(pdf, jsonData, rawText, errors);
             }
+
+
 
             return {
                 filename: pdf.filename,
