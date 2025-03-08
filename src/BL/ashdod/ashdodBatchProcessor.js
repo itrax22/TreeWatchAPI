@@ -1,10 +1,10 @@
 const {fieldMappings, replaceHebrewKeysWithEnglish, mappedToEnglish} = require('../../config/pdfFieldMappings');
-const {mapToTreePermitModel} = require('./mappers/dalMapper');
+const {mapToTreePermitModel} = require('./ashdodDalMapper');
 const fs = require('fs').promises;
 const TreePermit = require('../../DAL/models/treePermit');
 const TreePermitRepository = require('../../DAL/repositories/treePermitRepository');
 
-class RechovotBatchProcessor {
+class AshdodBatchProcessor {
     constructor(pdfDownloader, fileManager, pdfParser, batchSize) {
         this.pdfDownloader = pdfDownloader;
         this.fileManager = fileManager;
@@ -44,15 +44,18 @@ class RechovotBatchProcessor {
             }
 
             const { jsonData, rawText } = await this._parsePdfContent(pdf, tempFilePath, errors);
-            //Fix to download if the link is broken in some cases
+            
+            // Combine PDF metadata with extracted content
             const combinedData = {
                 ...pdf,
                 resourceData: {...jsonData}
             };
 
+            // Map to the TreePermit model format
             const mappedData = mapToTreePermitModel(combinedData);
             const treePermitInstance = new TreePermit(mappedData);
 
+            // Insert into the database
             await TreePermitRepository.insert(treePermitInstance);
 
             return {
@@ -97,19 +100,6 @@ class RechovotBatchProcessor {
         return { jsonData, rawText };
     }
 
-    async _saveResults(pdf, jsonData, rawText, errors) {
-        try {
-            await this.fileManager.saveOutputs(pdf.filename, jsonData, rawText, {
-                address: pdf.address,
-                licenseType: pdf.licenseType,
-                date: pdf.date,
-                pdfUrl: pdf.pdfUrl
-            });
-        } catch (saveError) {
-            this._logError(errors, pdf.filename, 'saving', saveError);
-        }
-    }
-
     _logError(errors, filename, stage, error) {
         console.warn(`Error in ${stage} for ${filename}:`, error.message);
         errors.push({
@@ -128,5 +118,4 @@ class RechovotBatchProcessor {
     }
 }
 
-
-module.exports = {RechovotBatchProcessor};
+module.exports = { AshdodBatchProcessor };

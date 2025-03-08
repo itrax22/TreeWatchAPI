@@ -1,27 +1,19 @@
 const { Datastore } = require('@google-cloud/datastore');
-const TreePermit = require('../models/treePermit');
+const QueryBuilder = require('../utils/queryBuilder');
 
-// Initialize GCP Datastore
-const projectId = 'treewatchapi'; // Replace with your actual project ID
-
+const projectId = 'treewatchapi';
 const datastore = new Datastore({projectId: projectId});
 
 const KIND = 'TreePermit';
 
 class TreePermitRepository {
-    /**
-     * Inserts a new TreePermit into Datastore if the resourceId for the settlement is unique.
-     * @param {TreePermit} treePermit - The TreePermit object to insert.
-     * @returns {Promise<string>} - The inserted entity's key or error message.
-     */
     static async insert(treePermit) {
         const { settlement, resourceId } = treePermit;
 
-        // Check if the resourceId exists in the same settlement
-        const query = datastore
-            .createQuery(KIND)
-            .filter('settlement', '=', settlement)
-            .filter('resourceId', '=', resourceId)
+        const query = new QueryBuilder(datastore, KIND)
+            .addFilter('settlement', '=', settlement)
+            .addFilter('resourceId', '=', resourceId)
+            .build()
             .limit(1);
 
         const [existingPermits] = await datastore.runQuery(query);
@@ -31,51 +23,76 @@ class TreePermitRepository {
             return;
         }
 
-        // Create a new key for the entity
         const key = datastore.key([KIND]);
-
-        // Prepare the entity
         const entity = {
             key,
             data: {
                 ...treePermit,
-                dates: treePermit.dates ? treePermit.dates : null, // Ensure dates are set properly
+                dates: treePermit.dates ? treePermit.dates : null,
                 recordCreatedAt: new Date().toISOString(),
             },
         };
 
-        // Save the entity
         await datastore.save(entity);
         return `Entity created with key: ${key.id || key.name}`;
     }
 
-    static async getTreePermits({ page, pageSize, sortBy }) {
-        const offset = (page - 1) * pageSize;
+    static buildQueryFilters(params) {
+        const queryBuilder = new QueryBuilder(datastore, KIND);
 
-        let query = datastore
-            .createQuery(KIND)
-            .limit(pageSize)
-            .offset(offset);
+        // Add text filters
+        if (params.settlementName) {
+            queryBuilder.addFilter('settlement', '=', params.settlementName);
+        }
+        if (params.reason) {
+            queryBuilder.addFilter('reasonShort', '=', params.reason);
+        }
+        if (params.licenseType) {
+            queryBuilder.addFilter('licenseType', '=', params.licenseType);
+        }
 
-        // Apply sorting
-        switch (sortBy) {
+        // Add sorting
+        switch (params.sortBy) {
             case 'createDate':
-                query = query.order('recordCreatedAt', { descending: true });
+                queryBuilder.addSort('recordCreatedAt', true);
                 break;
             case 'city':
-                query = query.order('settlement', { descending: false });
+                queryBuilder.addSort('settlement', false);
                 break;
             case 'licenseDate':
-                query = query.order('dates.licenseDate', { descending: true });
+                queryBuilder.addSort('dates.licenseDate', true);
                 break;
             case 'lastDateToObject':
                 const today = new Date();
-                query = query
-                    .filter('dates.lastDateToObject', '>=', today.toISOString())
-                    .order('dates.lastDateToObject', { descending: true });
+                queryBuilder
+                    .addFilter('dates.lastDateToObject', '>=', today)
+                    .addSort('dates.lastDateToObject', true);
+                break;
+            default:
+                queryBuilder.addSort('licenseDate', true);
                 break;
         }
+        return queryBuilder.build();
+    }
 
+    static async getTreePermits({ page, pageSize, sortBy, filters = {} }) {
+        const offset = (page - 1) * pageSize;
+
+        // Build the query with filters and sorting
+        const query = this.buildQueryFilters({ 
+            sortBy,
+            ...filters
+        });
+
+        // Run the aggregation query to get the total count
+        const aggregatedQuery = await datastore.createAggregationQuery(query);
+        const [totalCountResult] = await datastore.runAggregationQuery(aggregatedQuery.count()) || [0];
+        const totalCount = totalCountResult[0].property_1 || 0;
+
+        // Apply pagination
+        query.limit(pageSize).offset(offset);
+
+        // Fetch the paginated results
         const [entities] = await datastore.runQuery(query);
 
         // Transform results for output
@@ -89,9 +106,20 @@ class TreePermitRepository {
             metadata: {
                 currentPage: page,
                 pageSize,
-                totalCount: results.length,
+                totalCount,
+                totalPages: Math.ceil(totalCount / pageSize),
             },
         };
+    }
+
+    // Method to get distinct values for a field (useful for dropdowns)
+    static async getDistinctValues(field) {
+        const query = datastore.createQuery(KIND)
+            .select(field)
+            .groupBy(field);
+
+        const [entities] = await datastore.runQuery(query);
+        return [...new Set(entities.map(entity => entity[field]))].filter(Boolean);
     }
 }
 

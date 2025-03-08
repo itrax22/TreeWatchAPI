@@ -2,10 +2,23 @@ swagger: '2.0'
 info:
   title: Tree Permit API
   version: v1
-host: tree-permit-api-handler-643296747345.europe-west1.run.app
+host: tree-permit-api-endpoint-643296747345.europe-west1.run.app
 basePath: /
 schemes:
   - https
+x-google-management:
+  metrics:
+    - name: "get-tree-permits"
+      displayName: "List of Tree Permits"
+      valueType: INT64
+      metricKind: DELTA
+  quota:
+    limits:
+      - name: "get-tree-permits-limit"
+        metric: "get-tree-permits"
+        unit: "1/min/{project}"
+        values:
+          STANDARD: 20
 paths:
   /tree-permits:
     get:
@@ -32,4 +45,8 @@ paths:
         '500':
           description: Internal Server Error
       x-google-backend:
-        address: https://tree-permit-api-handler-643296747345.europe-west1.run.app/tree-permits
+        address: https://tree-permit-api-endpoint-643296747345.europe-west1.run.app/tree-permits
+      x-google-quota:
+        metricCosts:
+          "get-tree-permits": 1
+

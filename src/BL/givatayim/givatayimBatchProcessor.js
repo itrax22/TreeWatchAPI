@@ -1,15 +1,16 @@
 const {fieldMappings, replaceHebrewKeysWithEnglish, mappedToEnglish} = require('../../config/pdfFieldMappings');
-const {mapToTreePermitModel} = require('./mappers/dalMapper');
+const {mapToTreePermitModelWithCity} = require('./givatayimDalMapper');
 const fs = require('fs').promises;
 const TreePermit = require('../../DAL/models/treePermit');
 const TreePermitRepository = require('../../DAL/repositories/treePermitRepository');
 
-class RechovotBatchProcessor {
+class GivatayimBatchProcessor {
     constructor(pdfDownloader, fileManager, pdfParser, batchSize) {
         this.pdfDownloader = pdfDownloader;
         this.fileManager = fileManager;
         this.pdfParser = pdfParser;
         this.batchSize = batchSize;
+        this.cityCode = 'GIVT'; // City code for Givatayim
     }
 
     createBatches(items) {
@@ -44,15 +45,19 @@ class RechovotBatchProcessor {
             }
 
             const { jsonData, rawText } = await this._parsePdfContent(pdf, tempFilePath, errors);
-            //Fix to download if the link is broken in some cases
+            
+            // Combine PDF metadata with extracted content
             const combinedData = {
                 ...pdf,
-                resourceData: {...jsonData}
+                resourceData: {...jsonData},
+                city: 'גבעתיים' // Add city information
             };
 
-            const mappedData = mapToTreePermitModel(combinedData);
+            // Map to the TreePermit model format with city information
+            const mappedData = mapToTreePermitModelWithCity(combinedData, this.cityCode);
             const treePermitInstance = new TreePermit(mappedData);
 
+            // Insert into the database
             await TreePermitRepository.insert(treePermitInstance);
 
             return {
@@ -97,19 +102,6 @@ class RechovotBatchProcessor {
         return { jsonData, rawText };
     }
 
-    async _saveResults(pdf, jsonData, rawText, errors) {
-        try {
-            await this.fileManager.saveOutputs(pdf.filename, jsonData, rawText, {
-                address: pdf.address,
-                licenseType: pdf.licenseType,
-                date: pdf.date,
-                pdfUrl: pdf.pdfUrl
-            });
-        } catch (saveError) {
-            this._logError(errors, pdf.filename, 'saving', saveError);
-        }
-    }
-
     _logError(errors, filename, stage, error) {
         console.warn(`Error in ${stage} for ${filename}:`, error.message);
         errors.push({
@@ -128,5 +120,4 @@ class RechovotBatchProcessor {
     }
 }
 
-
-module.exports = {RechovotBatchProcessor};
+module.exports = { GivatayimBatchProcessor };
