@@ -2,10 +2,23 @@ swagger: '2.0'
 info:
   title: Tree Permit API
   version: v1
-host: tree-permit-api-handler-643296747345.europe-west1.run.app
+host: tree-permit-api-endpoint-643296747345.europe-west1.run.app
 basePath: /
 schemes:
   - https
+x-google-management:
+  metrics:
+    - name: "get-tree-permits"
+      displayName: "List of Tree Permits"
+      valueType: INT64
+      metricKind: DELTA
+  quota:
+    limits:
+      - name: "get-tree-permits-limit"
+        metric: "get-tree-permits"
+        unit: "1/min/{project}"
+        values:
+          STANDARD: 20
 paths:
   /tree-permits:
     get:
@@ -32,4 +45,137 @@ paths:
         '500':
           description: Internal Server Error
       x-google-backend:
-        address: https://tree-permit-api-handler-643296747345.europe-west1.run.app/tree-permits
+        address: https://tree-permit-api-endpoint-643296747345.europe-west1.run.app/tree-permits
+      x-google-quota:
+        metricCosts:
+          "get-tree-permits": 1
+  
+  /health:
+    get:
+      summary: Get System Health Statistics
+      operationId: getHealthStats
+      produces:
+        - application/json
+      responses:
+        '200':
+          description: System health statistics
+          schema:
+            type: object
+            properties:
+              totalJobs:
+                type: integer
+              successfulJobs:
+                type: integer
+              failedJobs:
+                type: integer
+              pendingJobs:
+                type: integer
+              runningJobs:
+                type: integer
+              healthScore:
+                type: integer
+              lastUpdated:
+                type: string
+        '500':
+          description: Internal Server Error
+      x-google-backend:
+        address: https://tree-permit-api-endpoint-643296747345.europe-west1.run.app/health
+  
+  /health/checks:
+    get:
+      summary: Get Health Check Records
+      operationId: getHealthChecks
+      produces:
+        - application/json
+      parameters:
+        - name: page
+          in: query
+          type: integer
+          default: 1
+        - name: pageSize
+          in: query
+          type: integer
+          default: 10
+        - name: jobName
+          in: query
+          type: string
+        - name: status
+          in: query
+          type: string
+          enum: [pending, running, success, failed]
+        - name: fromDate
+          in: query
+          type: string
+          format: date-time
+        - name: toDate
+          in: query
+          type: string
+          format: date-time
+        - name: sortBy
+          in: query
+          type: string
+          enum: [startTime, endTime, jobName, status, recordCreatedAt]
+          default: startTime
+        - name: sortDirection
+          in: query
+          type: string
+          enum: [asc, desc]
+          default: desc
+      responses:
+        '200':
+          description: Paginated list of health check records
+          schema:
+            type: object
+            properties:
+              data:
+                type: array
+                items:
+                  type: object
+              metadata:
+                type: object
+        '500':
+          description: Internal Server Error
+      x-google-backend:
+        address: https://tree-permit-api-endpoint-643296747345.europe-west1.run.app/health/checks
+  
+  /health/latest:
+    get:
+      summary: Get Latest Health Check for Each Job
+      operationId: getLatestHealthChecks
+      produces:
+        - application/json
+      responses:
+        '200':
+          description: Latest health check for each job
+          schema:
+            type: array
+            items:
+              type: object
+              properties:
+                jobId:
+                  type: string
+                jobName:
+                  type: string
+                status:
+                  type: string
+                  enum: [pending, running, success, failed]
+                startTime:
+                  type: string
+                  format: date-time
+                endTime:
+                  type: string
+                  format: date-time
+                duration:
+                  type: integer
+                  description: Duration in milliseconds
+                logs:
+                  type: array
+                  items:
+                    type: string
+                recordCreatedAt:
+                  type: string
+                  format: date-time
+        '500':
+          description: Internal Server Error
+      x-google-backend:
+        address: https://tree-permit-api-endpoint-643296747345.europe-west1.run.app/health/latest

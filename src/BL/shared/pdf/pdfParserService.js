@@ -1,7 +1,7 @@
 const fs = require('fs');
 const pdfParse = require('pdf-parse');
-const { TextProcessor } = require('../utils/TextProcessor');
-const { FileHandler } = require('../utils/FileHandler');
+const { TextProcessor } = require('../utils/textProcessor');
+const { FileHandler } = require('../utils/fileHandler');
 const { FieldExtractor } = require('./pdfFieldExtractor');
 const { version } = require('os');
 

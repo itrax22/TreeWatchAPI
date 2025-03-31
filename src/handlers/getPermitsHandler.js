@@ -1,4 +1,5 @@
 const TreePermitRepository = require('../DAL/repositories/treePermitRepository');
+const QUERY_CONSTANTS = require('../constants').constants.QUERY_CONSTANTS;
 
 const MAX_PAGE_SIZE = 50;
 
@@ -10,36 +11,48 @@ const MAX_PAGE_SIZE = 50;
 exports.getTreePermits = async (req, res) => {
     try {
         const {
-            page = 1, // Default to the first page
-            pageSize = 20, // Default page size
-            sortBy = 'createDate', // Default sort field
+            page = QUERY_CONSTANTS.DEFAULT_PAGE,
+            pageSize = QUERY_CONSTANTS.DEFAULT_PAGE_SIZE,
+            sortBy = QUERY_CONSTANTS.DEFAULT_SORT_FIELD,
+            settlementName,
+            reason,
+            licenseType
         } = req.query;
 
-        if (pageSize > MAX_PAGE_SIZE) {
-            return res.status(400).json({
-                error: `Page size cannot exceed ${MAX_PAGE_SIZE}`,
-            });
+        // Validation
+        const errors = [];
+        
+        if (parseInt(pageSize, 10) > QUERY_CONSTANTS.MAX_PAGE_SIZE) {
+            errors.push(`Page size cannot exceed ${QUERY_CONSTANTS.MAX_PAGE_SIZE}`);
         }
 
-        const validSortFields = ['createDate', 'city', 'licenseDate', 'lastDateToObject'];
-        if (!validSortFields.includes(sortBy)) {
-            return res.status(400).json({
-                error: `Invalid sortBy value. Must be one of: ${validSortFields.join(', ')}`,
-            });
+        if (sortBy && !QUERY_CONSTANTS.VALID_SORT_FIELDS.includes(sortBy)) {
+            errors.push(`Invalid sortBy value. Must be one of: ${QUERY_CONSTANTS.VALID_SORT_FIELDS.join(', ')}`);
         }
 
+        if (errors.length > 0) {
+            return res.status(400).json({ errors });
+        }
+
+        // Get results
         const results = await TreePermitRepository.getTreePermits({
             page: parseInt(page, 10),
             pageSize: parseInt(pageSize, 10),
             sortBy,
+            filters: {
+                settlementName,
+                reason,
+                licenseType
+            }
         });
 
         return res.status(200).json(results);
     } catch (error) {
         console.error('Error fetching TreePermits:', error);
         return res.status(500).json({
-            error: 'Internal Server Error',
+            error: 'Internal Server Error'
         });
     }
 };
+
 

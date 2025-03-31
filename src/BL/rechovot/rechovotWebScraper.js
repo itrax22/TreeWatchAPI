@@ -11,10 +11,22 @@ class RechovotWebScraper {
         this.dataParser = new RechovotDateParser();
     }
 
-    async fetchAndProcessPage() {
+    async fetchAndProcessPage(mode) {
         try {
             const response = await axios.get(this.siteUrl, { httpsAgent: this.httpsAgent });
-            return this._extractPdfInfo(response.data);
+            const results = this._extractPdfInfo(response.data);
+            if (mode === 'production') {
+                const lastMonth = new Date();
+                lastMonth.setMonth(lastMonth.getMonth() - 1);
+                lastMonth.setDate(1); // First day of last month
+                
+                return results.filter(license => {
+                    if (!license.date.start) return false;
+                    const licenseDate = new Date(license.date.start);
+                    return licenseDate >= lastMonth;
+                });
+            }
+            return results;
         } catch (error) {
             console.error('Error fetching the webpage:', error.message);
             return [];
@@ -58,6 +70,17 @@ class RechovotWebScraper {
             const parsedDates = this.dataParser.parseLicenseDates(startDate, endDate);
 
             const pdfFilename = pdfLink.replace('./uploads/n/', '');
+            if(pdfLink.includes('http')) {
+                let newPdfFilename = pdfFilename.split('/').pop();
+                return new RechovotLicense(
+                    address,
+                    licenseType,
+                    pdfLink,
+                    parsedDates.formattedStartDate,
+                    parsedDates.formattedEndDate,
+                    newPdfFilename
+                );
+            }
             const fullPdfUrl = `${this.baseUrl}/uploads/n/${pdfFilename}`;
 
             return new RechovotLicense(
