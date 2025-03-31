@@ -119,10 +119,118 @@ Required environment variables:
 
 ## API Endpoints
 
-The API exposes several endpoints for tree permit handling:
-- Single permit processing
-- Batch permit processing
-- Data retrieval and management
+### Base URL
+The API is served at the root URL. The default port is 8080.
+
+### Available Endpoints
+
+#### Tree Permits
+
+##### GET /tree-permits
+Retrieves tree permits with filtering, sorting, and pagination.
+
+**Query Parameters:**
+- `page` (optional): Page number (default: 1)
+- `pageSize` (optional): Number of items per page (default: 10, max: 50)
+- `sortBy` (optional): Field to sort by (must be one of the valid sort fields)
+- `settlementName` (optional): Filter by settlement name
+- `reason` (optional): Filter by reason
+- `licenseType` (optional): Filter by license type
+
+**Response:**
+- 200: Success with paginated results
+- 400: Bad request (invalid parameters)
+- 500: Internal server error
+
+#### Job Execution
+
+##### POST /run
+Launches all available jobs (rechovot, petah-tikva, rishon, givatayim, ashdod, netanya).
+
+**Response:**
+- 200: All jobs launched successfully
+- 207: Some jobs failed (with detailed results)
+- 500: Failed to launch jobs
+
+##### POST /run/:jobName
+Launches a specific job by name.
+
+**Path Parameters:**
+- `jobName`: Name of the job to run (one of: rechovot, petah-tikva, rishon, givatayim, ashdod, netanya)
+
+**Response:**
+- 200: Job launched successfully
+- 400: Bad request (missing job name)
+- 500: Failed to run job
+
+#### Health Monitoring
+
+##### GET /health
+Retrieves system health statistics.
+
+**Response:**
+- 200: Success with health statistics
+- 500: Failed to retrieve health statistics
+
+##### GET /health/checks
+Retrieves health check records with filtering and pagination.
+
+**Query Parameters:**
+- `page` (optional): Page number (default: 1)
+- `pageSize` (optional): Number of items per page (default: 10)
+- `jobName` (optional): Filter by job name
+- `status` (optional): Filter by status
+- `fromDate` (optional): Filter by start date
+- `toDate` (optional): Filter by end date
+- `sortBy` (optional): Field to sort by (default: 'startTime')
+- `sortDirection` (optional): Sort direction (default: 'desc')
+
+**Response:**
+- 200: Success with health check records
+- 500: Failed to retrieve health checks
+
+##### GET /health/latest
+Retrieves the latest health check for each job.
+
+**Response:**
+- 200: Success with latest health checks
+- 500: Failed to retrieve latest health checks
+
+##### GET /health/check/:id
+Retrieves a specific health check by ID.
+
+**Path Parameters:**
+- `id`: Health check ID
+
+**Response:**
+- 200: Success with health check details
+- 400: Bad request (missing ID)
+- 404: Health check not found
+- 500: Failed to retrieve health check
+
+#### Root Endpoint
+
+##### GET /
+Basic health check endpoint that confirms the service is running.
+
+**Response:**
+- 200: Service is running
+
+### CORS
+The API supports CORS with the following configuration:
+- Origin: All origins (*)
+- Methods: GET, HEAD, PUT, PATCH, POST, DELETE
+
+### Error Responses
+All endpoints may return the following error responses:
+- 400: Bad Request - Invalid parameters or missing required data
+- 404: Not Found - Requested resource not found
+- 500: Internal Server Error - Server-side error occurred
+
+Each error response includes a JSON object with:
+- `success`: false
+- `message`: Description of the error
+- `error`: Detailed error message (when available)
 
 ## Troubleshooting
 
