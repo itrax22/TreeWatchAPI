@@ -10,6 +10,20 @@ class TreePermitRepository {
     static async insert(treePermit) {
         const { settlement, resourceId } = treePermit;
 
+        // Check if the license date is in the future
+        if (treePermit.dates && treePermit.dates.licenseDate) {
+            const licenseDate = new Date(treePermit.dates.licenseDate);
+            const currentDate = new Date();
+            
+            if (licenseDate > currentDate) {
+                console.warn(`License date for resource ID ${resourceId} is in the future. Insertion prevented.`);
+                return {
+                    success: false,
+                    message: 'Cannot insert tree permit with a future license date'
+                };
+            }
+        }
+
         const query = new QueryBuilder(datastore, KIND)
             .addFilter('settlement', '=', settlement)
             .addFilter('resourceId', '=', resourceId)
@@ -20,7 +34,10 @@ class TreePermitRepository {
 
         if (existingPermits.length > 0) {
             console.warn(`Resource ID ${resourceId} already exists for settlement ${settlement}`);
-            return;
+            return {
+                success: false,
+                message: 'Resource ID already exists for this settlement'
+            };
         }
 
         const key = datastore.key([KIND]);
@@ -34,7 +51,10 @@ class TreePermitRepository {
         };
 
         await datastore.save(entity);
-        return `Entity created with key: ${key.id || key.name}`;
+        return {
+            success: true,
+            message: `Entity created with key: ${key.id || key.name}`
+        };
     }
 
     static buildQueryFilters(params) {
@@ -96,10 +116,14 @@ class TreePermitRepository {
         const [entities] = await datastore.runQuery(query);
 
         // Transform results for output
-        const results = entities.map((entity) => ({
-            id: entity[datastore.KEY].id,
-            ...entity,
-        }));
+        const results = entities.map((entity) => {
+            const permit = {
+                id: entity[datastore.KEY].id,
+                ...entity,
+            };
+            // Apply date formatting
+            return this.formatPermitDates(permit);
+        });
 
         return {
             data: results,
@@ -121,6 +145,39 @@ class TreePermitRepository {
         const [entities] = await datastore.runQuery(query);
         return [...new Set(entities.map(entity => entity[field]))].filter(Boolean);
     }
-}
 
+    static formatPermitDates(permit) {
+        const formattedPermit = { ...permit };
+        
+        if (formattedPermit.dates) {
+            // Create a copy of the dates object
+            const formattedDates = { ...formattedPermit.dates };
+            
+            // Format each date property that is a Date object and overwrite the original value
+            const dateFields = ['startDate', 'endDate', 'licenseDate', 'printDate', 'lastDateToObject'];
+            for (const field of dateFields) {
+                if (formattedDates[field] instanceof Date) {
+                    // Store the formatted date string, overwriting the Date object
+                    formattedDates[field] = this.formatDateToEuropean(formattedDates[field]);
+                }
+            }
+            
+            formattedPermit.dates = formattedDates;
+        }
+        
+        return formattedPermit;
+    }
+
+    static formatDateToEuropean(date) {
+        if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+            return null;
+        }
+        
+        const day = date.getDate().toString().padStart(2, '0');
+        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+        const year = date.getFullYear();
+        
+        return `${day}/${month}/${year}`;
+    }
+}
 module.exports = TreePermitRepository;

@@ -13,5 +13,5 @@ variable "region" {
 variable "kinds" {
   description = "List of kinds (entities) for Datastore"
   type        = list(string)
-  default     = ["TreePermit"]
+  default     = ["TreePermit", "HealthCheck"]
 }

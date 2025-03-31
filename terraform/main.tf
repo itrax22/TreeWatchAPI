@@ -287,3 +287,58 @@ resource "google_datastore_index" "tree_permit_license_date_sort" {
     direction = "DESCENDING"
   }
 }
+# Index for health check filtering by jobName and sorting by startTime
+resource "google_datastore_index" "health_check_job_name_start_time" {
+  project  = var.project_id
+  kind     = "HealthCheck"
+  ancestor = "NONE"
+
+  properties {
+    name      = "jobName"
+    direction = "ASCENDING"
+  }
+
+  properties {
+    name      = "startTime"
+    direction = "DESCENDING"
+  }
+}
+
+# Index for health check filtering by status and sorting by startTime
+resource "google_datastore_index" "health_check_status_start_time" {
+  project  = var.project_id
+  kind     = "HealthCheck"
+  ancestor = "NONE"
+
+  properties {
+    name      = "status"
+    direction = "ASCENDING"
+  }
+
+  properties {
+    name      = "startTime"
+    direction = "DESCENDING"
+  }
+}
+
+# Index for health check filtering by jobName and status and sorting by startTime
+resource "google_datastore_index" "health_check_job_name_status_start_time" {
+  project  = var.project_id
+  kind     = "HealthCheck"
+  ancestor = "NONE"
+
+  properties {
+    name      = "jobName"
+    direction = "ASCENDING"
+  }
+
+  properties {
+    name      = "status"
+    direction = "ASCENDING"
+  }
+
+  properties {
+    name      = "startTime"
+    direction = "DESCENDING"
+  }
+}

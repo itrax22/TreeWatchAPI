@@ -5,12 +5,13 @@ const TreePermit = require('../../DAL/models/treePermit');
 const TreePermitRepository = require('../../DAL/repositories/treePermitRepository');
 
 class GivatayimBatchProcessor {
-    constructor(pdfDownloader, fileManager, pdfParser, batchSize) {
+    constructor(pdfDownloader, fileManager, pdfParser, batchSize, isProduction = true) {
         this.pdfDownloader = pdfDownloader;
         this.fileManager = fileManager;
         this.pdfParser = pdfParser;
         this.batchSize = batchSize;
         this.cityCode = 'GIVT'; // City code for Givatayim
+        this.isProduction = isProduction;
     }
 
     createBatches(items) {
@@ -24,16 +25,17 @@ class GivatayimBatchProcessor {
     async processBatch(batch) {
         const batchResults = [];
         const errors = [];
+        const skippedDueToDate = [];
 
         for (const item of batch) {
-            const result = await this._processItem(item, errors);
+            const result = await this._processItem(item, errors, skippedDueToDate);
             batchResults.push(result);
         }
 
-        return { results: batchResults, errors };
+        return { results: batchResults, errors, skippedDueToDate };
     }
 
-    async _processItem(pdf, errors) {
+    async _processItem(pdf, errors, skippedDueToDate) {
         const tempFilePath = this.fileManager.getTempFilePath(pdf.filename);
         
         try {
@@ -57,14 +59,26 @@ class GivatayimBatchProcessor {
             const mappedData = mapToTreePermitModelWithCity(combinedData, this.cityCode);
             const treePermitInstance = new TreePermit(mappedData);
 
-            // Insert into the database
-            await TreePermitRepository.insert(treePermitInstance);
+            // Check if we should insert based on licenseDate when in production mode
+            const shouldInsert = this._shouldInsertBasedOnDate(treePermitInstance);
+            
+            if (shouldInsert) {
+                // Insert into the database
+                await TreePermitRepository.insert(treePermitInstance);
+            } else {
+                skippedDueToDate.push({
+                    filename: pdf.filename,
+                    licenseDate: treePermitInstance.dates?.licenseDate
+                });
+            }
 
             return {
                 filename: pdf.filename,
                 success: true,
                 hasJson: !!jsonData,
                 hasText: !!rawText,
+                inserted: shouldInsert,
+                licenseDate: treePermitInstance.dates?.licenseDate,
                 errors: errors.filter(e => e.filename === pdf.filename)
             };
 
@@ -78,6 +92,27 @@ class GivatayimBatchProcessor {
         } finally {
             await this._cleanup(tempFilePath);
         }
+    }
+
+    _shouldInsertBasedOnDate(treePermit) {
+        // If not in production mode, always insert
+        if (!this.isProduction) {
+            return true;
+        }
+
+        // In production mode, check if licenseDate is within the last 60 days
+        if (!treePermit.dates || !treePermit.dates.licenseDate) {
+            console.warn(`Missing licenseDate for permit ${treePermit.filename}, skipping in production mode`);
+            return false;
+        }
+
+        const licenseDate = new Date(treePermit.dates.licenseDate);
+        const now = new Date();
+        const sixtyDaysAgo = new Date();
+        sixtyDaysAgo.setDate(now.getDate() - 60);
+
+        // Only insert if license date is within the last 60 days
+        return licenseDate >= sixtyDaysAgo;
     }
 
     async _parsePdfContent(pdf, tempFilePath, errors) {

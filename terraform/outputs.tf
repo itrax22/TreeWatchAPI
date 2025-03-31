@@ -79,6 +79,43 @@ output "tree_permit_indexes" {
   }
 }
 
+output "health_check_indexes" {
+  description = "Details of the HealthCheck kind's configured indexes"
+  value = {
+    "job_name_start_time" = {
+      kind      = google_datastore_index.health_check_job_name_start_time.kind
+      properties = [
+        for property in google_datastore_index.health_check_job_name_start_time.properties :
+        {
+          name      = property.name
+          direction = property.direction
+        }
+      ]
+    },
+    "status_start_time" = {
+      kind      = google_datastore_index.health_check_status_start_time.kind
+      properties = [
+        for property in google_datastore_index.health_check_status_start_time.properties :
+        {
+          name      = property.name
+          direction = property.direction
+        }
+      ]
+    },
+    "job_name_status_start_time" = {
+      kind      = google_datastore_index.health_check_job_name_status_start_time.kind
+      properties = [
+        for property in google_datastore_index.health_check_job_name_status_start_time.properties :
+        {
+          name      = property.name
+          direction = property.direction
+        }
+      ]
+    }
+  }
+}
+
+
 output "api_gateway_url" {
   value       = google_api_gateway_gateway.tree_permit_gateway.default_hostname
   description = "The public URL for the Tree Permit API"

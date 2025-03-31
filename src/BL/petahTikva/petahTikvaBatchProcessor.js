@@ -1,16 +1,21 @@
 const { PetahTikvaPdfParser } = require('./petahTikvaPdfParser');
-const TreePermitRepository  = require('../../DAL/repositories/treePermitRepository');
+const TreePermitRepository = require('../../DAL/repositories/treePermitRepository');
 const PermitDates = require('../../DAL/models/permitDates');
 
 class PetahTikvaBatchProcessor {
-    constructor(pdfDownloader, fileManager, pdfParser, batchSize) {
+    constructor(pdfDownloader, fileManager, genericPdfParser, batchSize) {
         this.pdfDownloader = pdfDownloader;
         this.fileManager = fileManager;
-        this.pdfParser = pdfParser;
+        this.genericPdfParser = genericPdfParser;
         this.batchSize = batchSize;
         this.customParser = new PetahTikvaPdfParser();
     }
 
+    /**
+     * Create batches from PDF list
+     * @param {Array} pdfList - List of PDFs to process
+     * @returns {Array} Batches of PDFs for processing
+     */
     createBatches(pdfList) {
         const batches = [];
         for (let i = 0; i < pdfList.length; i += this.batchSize) {
@@ -20,119 +25,10 @@ class PetahTikvaBatchProcessor {
     }
 
     /**
-     * Maps the reason from Petah Tikva format to standardized reason format
-     * @param {string} ptReason - The reason from Petah Tikva permit
-     * @returns {Object} Object containing reasonShort and reasonDetailed
+     * Process a batch of PDFs
+     * @param {Array} batch - Batch of PDFs to process
+     * @returns {Object} Results and errors from processing
      */
-    mapReason(ptReason) {
-        if (!ptReason) {
-            return { reasonShort: null, reasonDetailed: null };
-        }
-
-        // Map Hebrew reasons to standardized formats
-        const reasonMap = {
-            'בניה': { short: 'בנייה', detailed: 'עץ מפריע לבניה' },
-            'עץ מת': { short: 'עץ מת', detailed: 'עץ יבש' },
-            'מנוון': { short: 'מחלת עץ', detailed: 'עץ מנוון' },
-            'מסוכן': { short: 'בטיחות', detailed: 'עץ מסוכן' },
-            'בטיחות': { short: 'בטיחות', detailed: 'גורם סכנה בטיחותית' }
-        };
-
-        const mappedReason = reasonMap[ptReason] || { short: 'אחר', detailed: ptReason };
-        return {
-            reasonShort: mappedReason.short,
-            reasonDetailed: mappedReason.detailed
-        };
-    }
-
-    /**
-     * Convert a Petah Tikva permit to the TreePermit model format
-     * @param {Object} permit - Single permit from Petah Tikva parser
-     * @param {Object} metadata - Additional metadata about the permit
-     * @returns {Object} TreePermit compatible object
-     */
-    convertToTreePermitFormat(permit, metadata) {
-        if (!permit) return null;
-
-        // Extract house number if included in the address
-        let address = permit.address || '';
-        let houseNumber = '';
-        
-        // Try to extract house number from address
-        const addressMatch = address.match(/^(.+?)\s+(\d+.*)$/);
-        if (addressMatch) {
-            address = addressMatch[1];
-            houseNumber = addressMatch[2];
-        }
-
-        // Map the reason
-        const reasonInfo = this.mapReason(permit.reason);
-
-        // Format the licenseDate
-        let licenseDate = null;
-        if (permit.licenseDate) {
-            // Check if it's already in ISO format
-            if (permit.licenseDate.includes('-')) {
-                licenseDate = permit.licenseDate;
-            } else {
-                // Convert DD/MM/YYYY to ISO format
-                const [day, month, year] = permit.licenseDate.split('/');
-                licenseDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T00:00:00.000Z`;
-            }
-        } else if (metadata.publishDate) {
-            licenseDate = metadata.publishDate;
-        }
-
-        // Create dates object
-        const dates = new PermitDates({
-            startDate: null,
-            endDate: null,
-            licenseDate: licenseDate,
-            printDate: licenseDate
-        });
-
-        // Create tree notes array
-        const treeNotes = [];
-        if (permit.treeType) {
-            treeNotes.push({
-                name: permit.treeType,
-                amount: permit.treeCount || 1
-            });
-        }
-
-        // Generate unique resource ID
-        const resourceId = metadata.pdfUrl 
-            ? metadata.pdfUrl.split('/').pop() + permit.licenseNumber
-            : `petah-tikva-${permit.licenseNumber || Date.now()}.pdf`;
-
-        return {
-            permitNumber: permit.licenseNumber ? String(permit.licenseNumber) : String(metadata.licenseNumber || ''),
-            licenseType: permit.requestType || 'כריתה',
-            address: null,
-            houseNumber: null,
-            settlement: 'פתח תקווה',
-            gush: permit.blockNumber ? String(permit.blockNumber) : null,
-            helka: permit.parcelNumber ? String(permit.parcelNumber) : null,
-            reasonShort: reasonInfo.reasonShort,
-            reasonDetailed: reasonInfo.reasonDetailed,
-            licenseOwnerName: null,
-            licenseOwnerId: null,
-            licenseIssuerName: null,
-            licenseIssuerRole: 'פקיד יערות',
-            licenseIssuerPhoneNumber: null,
-            licenseApproverName: null,
-            approverTitle: 'פקיד יערות העירוני פתח תקווה',
-            licenseStatus: 'בתוקף',
-            originalRequestNumber: null,
-            forestPlotDetails: null,
-            treeNotes: treeNotes,
-            dates: dates,
-            resourceUrl: metadata.pdfUrl || null,
-            resourceId: resourceId,
-            recordCreatedAt: new Date().toISOString()
-        };
-    }
-
     async processBatch(batch) {
         const results = [];
         const errors = [];
@@ -141,83 +37,37 @@ class PetahTikvaBatchProcessor {
             try {
                 console.log(`Processing ${pdf.filename} for license ${pdf.licenseNumber}...`);
                 
-                // Get temporary file path
+                // Download the PDF first
                 const tempFilePath = await this.fileManager.getTempFilePath(pdf.filename);
-                
-                // Download PDF
                 const downloadResult = await this.pdfDownloader.downloadPdf(pdf.pdfUrl, tempFilePath);
+                
                 if (!downloadResult) {
-                    throw new Error(`Failed to download PDF: ${downloadResult.error}`);
+                    throw new Error(`Failed to download PDF: ${pdf.pdfUrl}`);
                 }
                 
-                // Process PDF - first try with the generic parser
-                let rawText = null;
-                let jsonData = null;
+                // Process the PDF content
+                const processedData = await this.processPdf(tempFilePath, pdf);
                 
-                try {
-                    // Extract raw text
-                    rawText = await this.pdfParser.extractRawText(tempFilePath);
-                    
-                    // Use our custom parser for Petah-Tikva PDFs
-                    jsonData = await this.customParser.parsePetahTikvaPdf(rawText, pdf.licenseNumber);
-                } catch (parseError) {
-                    console.warn(`Error parsing PDF ${pdf.filename}:`, parseError.message);
-                    errors.push({
-                        filename: pdf.filename,
-                        licenseNumber: pdf.licenseNumber,
-                        stage: 'parsing',
-                        error: parseError.message
-                    });
-                }
-                
-                // Save outputs
-                if (jsonData || rawText) {
-                    // await this.fileManager.saveOutputs(
-                    //     pdf.filename,
-                    //     jsonData,
-                    //     rawText,
-                    //     pdf.metadata
-                    // );
-                    
-                    // Store data in repository
-                    if (jsonData && jsonData.permits && jsonData.permits.length > 0) {
-                        for (const permit of jsonData.permits) {
-                            try {
-                                // Convert to TreePermit format
-                                const metadata = {
-                                    pdfUrl: pdf.pdfUrl,
-                                    licenseNumber: pdf.licenseNumber,
-                                    publishDate: pdf.publishDate
-                                };
-                                
-                                const treePermit = this.convertToTreePermitFormat(permit, metadata);
-                                
-                                // Insert into repository
-                                await TreePermitRepository.insert(treePermit);
-                            } catch (repoError) {
-                                console.error(`Error storing permit in repository:`, repoError.message);
-                                errors.push({
-                                    filename: pdf.filename,
-                                    licenseNumber: pdf.licenseNumber,
-                                    stage: 'repository',
-                                    error: repoError.message
-                                });
-                            }
-                        }
-                    }
-                }
-                
+                // Store results
                 results.push({
                     filename: pdf.filename,
                     licenseNumber: pdf.licenseNumber,
                     success: true,
-                    hasJson: !!jsonData,
-                    hasText: !!rawText,
+                    hasJson: !!processedData.permits,
+                    hasText: !!processedData.rawText,
+                    permitCount: processedData.permits ? processedData.permits.length : 0,
                     errors: errors.filter(e => e.filename === pdf.filename)
                 });
                 
             } catch (error) {
                 console.error(`Error processing ${pdf.filename}:`, error.message);
+                errors.push({
+                    filename: pdf.filename,
+                    licenseNumber: pdf.licenseNumber,
+                    stage: 'processing',
+                    error: error.message
+                });
+                
                 results.push({
                     filename: pdf.filename,
                     licenseNumber: pdf.licenseNumber,
@@ -230,6 +80,41 @@ class PetahTikvaBatchProcessor {
         return {
             results,
             errors
+        };
+    }
+
+    /**
+     * Process a single PDF file
+     * @param {string} tempFilePath - Path to the PDF file
+     * @param {Object} pdfInfo - Information about the PDF
+     * @returns {Object} Processed data including permits and raw text
+     */
+    async processPdf(tempFilePath, pdfInfo) {
+        // Parse the PDF with our custom parser
+        const jsonData = await this.customParser.parsePetahTikvaPdf(tempFilePath, pdfInfo.pdfUrl);
+        
+        // Save the extraction outputs if they exist
+        if (jsonData || rawText) {
+            // Save outputs to storage if needed
+            // await this.fileManager.saveOutputs(pdfInfo.filename, jsonData, rawText, pdfInfo.metadata);
+            
+            // Store permits in repository if they exist
+            if (jsonData && jsonData.permits && jsonData.permits.length > 0) {
+                for (const permit of jsonData.permits) {
+                    try {
+                        // Tree permits are already in the correct format
+                        await TreePermitRepository.insert(permit);
+                    } catch (repoError) {
+                        console.error(`Error storing permit in repository:`, repoError.message);
+                        throw repoError;
+                    }
+                }
+            }
+        }
+        
+        return {
+            permits: jsonData.permits || [],
+            rawText
         };
     }
 }

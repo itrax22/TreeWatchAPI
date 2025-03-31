@@ -51,7 +51,7 @@ class RechovotBatchProcessor {
             };
 
             const mappedData = mapToTreePermitModel(combinedData);
-            const treePermitInstance = new TreePermit(mappedData);
+        const treePermitInstance = new TreePermit(mappedData);
 
             await TreePermitRepository.insert(treePermitInstance);
 

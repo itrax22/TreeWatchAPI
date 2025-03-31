@@ -1,1015 +1,667 @@
+const fs = require('fs');
+const pdfParse = require('pdf-parse');
+const PermitDates = require('../../DAL/models/permitDates');
+const TreePermit = require('../../DAL/models/treePermit');
+
 class PetahTikvaPdfParser {
     constructor() {
-        // Hebrew field mappings (RTL)
-        this.fieldMappings = {
-            addressField: 'כתובת',
-            treeCountField: 'מס עצים',
-            treeTypeField: 'שם העץ',
-            reasonField: 'הסיבה',
-            requestTypeField: 'הבקשה',
-            licenseNumberField: 'מס רישיון',
-            dateField: 'תאריך',
-            applicantField: 'שם המבקש',
-            blockField: 'גוש',
-            parcelField: 'חלקה'
-        };
-
-        // Known tree species in Hebrew (common in Petah Tikva reports)
-        this.knownTreeSpecies = [
-            'ברוש מצוי',
-            'סיגלון עלה-מימוזה',
-            'אזדרכת מצויה',
-            'פלומריה ריחנית',
-            'קתרוסית מרובעת',
-            'תמר מצוי-דקל',
-            'קליסטמון',
-            'פנסית דו-נוצתית',
-            'אקליפטוס',
-            'דקל וושינגטוניה',
-            'אלון',
-            'שיטה',
-            'פיקוס',
-            'צאלון'
+        // Define column regions for parsing
+        this.columnDefinitions = [
+            { name: 'כתובת', startX: 700, endX: 800 },
+            { name: 'מס עצים', startX: 670, endX: 700 },
+            { name: 'שם העץ', startX: 560, endX: 670 },
+            { name: 'הסיבה', startX: 495, endX: 550 },
+            { name: 'הבקשה', startX: 450, endX: 495 },
+            { name: 'מס רישיון', startX: 380, endX: 440 },
+            { name: 'תאריך', startX: 300, endX: 380 },
+            { name: 'שם המבקש', startX: 220, endX: 340 }, // Wider range for applicant name
+            { name: 'גוש', startX: 170, endX: 220 },
+            { name: 'חלקה', startX: 0, endX: 170 }
         ];
-
-        // Known reason values in Hebrew
-        this.knownReasons = [
-            'בניה',
-            'עץ מת',
-            'מנוון',
-            'מסוכן',
-            'בטיחות'
-        ];
-
-        // Recognizing patterns for various fields
-        this.patterns = {
-            headerPattern: /רשימת רישיונות כריתה/,
-            addressLine: /^[\u0590-\u05FF\s\d'-]+\s+\d+$/,
-            treeType: /^[\u0590-\u05FF\s-]+$/,
-            reason: new RegExp(`(${this.knownReasons.join('|')})`),
-            requestType: /(כריתה|העתקה)/,
-            date: /(\d{1,2})\/(\d{1,2})\/(\d{4})/,
-            licenseNumber: /\b(\d{4})\b/,
-            applicant: /^[\u0590-\u05FF\s\d"'.]+$/
-        };
     }
 
     /**
-     * Enhanced RTL text normalization for proper display
-     * @param {string} text - The text to normalize
-     * @returns {string} Normalized text with proper RTL marks
+     * Parse Petah Tikva PDF into structured data
+     * @param {string} tempFilePath - Path to the PDF file
+     * @param {string} pdfUrl - URL of the original PDF
+     * @returns {Object} Structured permit data
      */
-    normalizeRtlText(text) {
-        if (!text) return text;
-        
-        // Add RTL mark at the beginning of each line to ensure proper direction
-        // \u200F is the Right-to-Left Mark (RLM)
-        // Also add the Unicode Bidirectional Override U+202E to force RTL direction
-        return text.split('\n')
-            .map(line => {
-                // Only add RLM if the line contains Hebrew characters
-                if (/[\u0590-\u05FF]/.test(line)) {
-                    // Use a stronger approach with RLM and RTL embedding
-                    return '\u202B' + line.replace(/[\u200F\u202B\u202E]/g, '');
-                }
-                return line;
-            })
-            .join('\n');
-    }
-
-    /**
-     * Enhanced method to fix RTL word order that properly handles complex Hebrew text
-     * @param {string} text - The text to fix
-     * @returns {string} Fixed text with proper RTL word order
-     */
-    fixRtlWordOrder(text) {
-        if (!text) return text;
-        
-        // Split by lines and process each line
-        const lines = text.split('\n');
-        const processedLines = [];
-        
-        for (const line of lines) {
-            // Skip empty lines
-            if (!line.trim()) {
-                processedLines.push(line);
-                continue;
-            }
+    async parsePetahTikvaPdf(tempFilePath, pdfUrl) {
+        try {
+            // Read the PDF file
+            const dataBuffer = fs.readFileSync(tempFilePath);
+            let rawText = '';
+            const allTextItems = [];
             
-            // For lines with Hebrew content, we need special handling
-            if (/[\u0590-\u05FF]/.test(line)) {
-                // First, identify "chunks" - these are logical groups in the line
-                // A chunk might be an address, a tree name, a reason, etc.
-                const chunks = this.identifyChunks(line);
-                
-                // We don't reverse the whole line, but process each chunk appropriately
-                let processedLine = '';
-                
-                for (const chunk of chunks) {
-                    if (chunk.type === 'hebrew') {
-                        // For pure Hebrew text, keep it as is - proper RTL marks will handle display
-                        processedLine += chunk.text;
-                    } else if (chunk.type === 'mixed') {
-                        // For mixed content, carefully handle the order
-                        processedLine += this.processMixedChunk(chunk.text);
-                    } else {
-                        // Non-Hebrew chunks stay as they are
-                        processedLine += chunk.text;
+            // Parse the PDF
+            const data = await pdfParse(dataBuffer, {
+                pagerender: async function(pageData) {
+                    // Get text content with position information
+                    const textContent = await pageData.getTextContent();
+                    
+                    // Process each text item to store it with position information
+                    if (textContent && textContent.items) {
+                        for (let i = 0; i < textContent.items.length; i++) {
+                            const item = textContent.items[i];
+                            allTextItems.push({
+                                str: item.str,
+                                transform: item.transform
+                            });
+                        }
                     }
+                    
+                    return pageData.getTextContent().then(content => {
+                        return content.items.map(item => item.str).join(' ');
+                    });
                 }
-                
-                processedLines.push(processedLine);
-            } else {
-                // For non-Hebrew lines, keep as is
-                processedLines.push(line);
-            }
-        }
-        
-        return processedLines.join('\n');
-    }
-    
-    /**
-     * Identify logical chunks in a line of text
-     * @param {string} line - Line to process
-     * @returns {Array} Array of chunk objects
-     */
-    identifyChunks(line) {
-        const chunks = [];
-        let currentChunk = { text: '', type: null };
-        
-        // Pattern to detect potential chunk boundaries
-        const chunkBoundaryPattern = /[\t\s]{2,}/;
-        
-        // Split by potential chunk boundaries but keep the separator
-        const parts = line.split(new RegExp(`(${chunkBoundaryPattern.source})`));
-        
-        for (const part of parts) {
-            // Skip empty parts
-            if (!part) continue;
+            });
             
-            // If it's a chunk boundary, add the current chunk and reset
-            if (chunkBoundaryPattern.test(part)) {
-                if (currentChunk.text) {
-                    chunks.push(currentChunk);
-                }
-                chunks.push({ text: part, type: 'separator' });
-                currentChunk = { text: '', type: null };
-            } else {
-                // Determine the type of this part
-                const type = this.getChunkType(part);
-                
-                // If we already have a chunk and the type is different, create a new chunk
-                if (currentChunk.type && type !== currentChunk.type) {
-                    chunks.push(currentChunk);
-                    currentChunk = { text: part, type };
-                } else {
-                    // Add to current chunk
-                    currentChunk.text += part;
-                    currentChunk.type = type;
-                }
+            // Always ensure rawText is defined
+            rawText = data.text || '';
+            
+            // Extract license entries using position-based parsing
+            let entries = this.extractLicenseEntries(allTextItems, pdfUrl);
+            
+            // If no entries found with position-based parsing, try text-based parsing
+            if (entries.length === 0 && rawText) {
+                entries = this.extractLicenseEntriesFromText(rawText, pdfUrl);
             }
+            
+            return {
+                permits: entries,
+                success: entries.length > 0,
+                rawText: rawText
+            };
+        } catch (error) {
+            console.error('Error parsing Petah Tikva PDF:', error);
+            return {
+                permits: [],
+                success: false,
+                error: error.message,
+                rawText: '' // Ensure rawText is defined even in error case
+            };
         }
-        
-        // Add the last chunk if any
-        if (currentChunk.text) {
-            chunks.push(currentChunk);
-        }
-        
-        return chunks;
-    }
-    
-    /**
-     * Determine the type of a text chunk
-     * @param {string} text - Text to check
-     * @returns {string} Type of chunk: "hebrew", "number", "mixed", or "other"
-     */
-    getChunkType(text) {
-        // Pure Hebrew text
-        if (/^[\u0590-\u05FF\s]+$/.test(text)) {
-            return "hebrew";
-        }
-        
-        // Pure numbers
-        if (/^\d+$/.test(text)) {
-            return "number";
-        }
-        
-        // Mixed Hebrew and other characters
-        if (/[\u0590-\u05FF]/.test(text)) {
-            return "mixed";
-        }
-        
-        // Other
-        return "other";
-    }
-    
-    /**
-     * Process mixed content chunks (containing both Hebrew and non-Hebrew)
-     * @param {string} text - Mixed content chunk
-     * @returns {string} Processed text
-     */
-    processMixedChunk(text) {
-        // For mixed content with both Hebrew and non-Hebrew, 
-        // we need to handle with care
-        
-        // For tree names with hyphens (like "סיגלון עלה-מימוזה"), keep them together
-        if (this.looksLikeTreeName(text)) {
-            return text;
-        }
-        
-        // For addresses with numbers, keep the structure intact
-        if (this.isAddressLine(text)) {
-            return text;
-        }
-        
-        // For other mixed content, try to maintain logical word order
-        // This is complex and may require domain-specific rules
-        
-        // Detect potential word boundaries within the mixed chunk
-        const words = text.split(/\s+/);
-        
-        // If it's a short mixed phrase, keep it intact
-        if (words.length <= 3) {
-            return text;
-        }
-        
-        // For longer phrases, assume a logical structure that RTL display will handle correctly
-        return text;
-    }
-    
-    /**
-     * Check if text looks like a tree name
-     * @param {string} text - Text to check
-     * @returns {boolean} Whether it looks like a tree name
-     */
-    looksLikeTreeName(text) {
-        // Common tree name patterns in Hebrew
-        // Most tree names are 2-3 words with potential hyphens
-        const treeNamePattern = /^[\u0590-\u05FF\s-]+$/;
-        const wordCount = text.split(/\s+/).length;
-        
-        return treeNamePattern.test(text) && wordCount <= 3;
     }
 
     /**
-     * Improved preprocessing for Hebrew text from PDF
-     * @param {string} rawText - The raw text from PDF
-     * @returns {string} Properly processed text for parsing
+     * Extract license entries from text items
+     * @param {Array} textItems - Text items from PDF
+     * @param {string} pdfUrl - URL of the PDF
+     * @returns {Array} Extracted license entries
      */
-    preprocessText(rawText) {
-        if (!rawText) return '';
-        
-        // 1. Normalize line endings
-        let processedText = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-        
-        // 2. Remove extra spaces
-        processedText = processedText.replace(/\s{2,}/g, ' ').trim();
-        
-        // 3. Fix RTL word order (this handles Hebrew text properly)
-        processedText = this.fixRtlWordOrder(processedText);
-        
-        // 4. Add RTL marks for proper display
-        processedText = this.normalizeRtlText(processedText);
-        
-        // 5. Handle combining characters and normalize Unicode
-        processedText = processedText.normalize('NFC');
-        
-        return processedText;
-    }
-
-    /**
-     * Enhanced pattern matching for address lines
-     * @param {string} line - Line to check
-     * @returns {boolean} Whether this is an address line
-     */
-    isAddressLine(line) {
-        // Address in Hebrew will usually end with a number (street number)
-        // and will contain only Hebrew characters, spaces, digits and punctuation
-        return (/[\u0590-\u05FF]/.test(line) && 
-                /\d+$/.test(line.trim()) && 
-                line.length < 50);
-    }
-    
-    /**
-     * Enhanced pattern matching for tree type
-     * @param {string} line - Line to check
-     * @returns {boolean} Whether this is a tree type line
-     */
-    isTreeTypeLine(line) {
-        // Remove RTL marks for comparison
-        const cleanLine = line.replace(/[\u200F\u202B\u202E]/g, '').trim();
-        
-        // Common tree names in Hebrew (partial list, can be expanded)
-        const commonTreeNames = [
-            'ברוש', 'אורן', 'אקליפטוס', 'דקל', 'תמר', 'אלון',
-            'זית', 'תאנה', 'רימון', 'הדר', 'אזדרכת', 'סיסם',
-            'שיטה', 'צאלון', 'פיקוס', 'סיגלון', 'מילה', 'כליל',
-            'אלביציה', 'אדר', 'ערמון', 'מגנוליה', 'פלומריה',
-            'קליסטמון', 'פנסית', 'קתרוסית'
-        ];
-        
-        // Check if the line contains any common tree name
-        const hasCommonTreeName = commonTreeNames.some(treeName => cleanLine.includes(treeName));
-        
-        // Tree types are fully Hebrew names, typically 1-3 words with possible hyphens
-        // Exclude lines that contain field names or known reasons
-        return (this.patterns.treeType.test(cleanLine) && 
-                !cleanLine.includes(this.fieldMappings.treeTypeField) && 
-                !this.isReasonLine(cleanLine) &&
-                cleanLine.length < 40 &&
-                cleanLine.split(/\s+/).length <= 3 &&
-                (hasCommonTreeName || /מצוי|ריחני|עלה/.test(cleanLine)));
-    }
-    
-    /**
-     * Enhanced pattern matching for reason lines
-     * @param {string} line - Line to check
-     * @returns {boolean} Whether this contains a known reason
-     */
-    isReasonLine(line) {
-        // Clean the line of any RTL marks for comparison
-        const cleanLine = line.replace(/[\u200F\u202B\u202E]/g, '').trim();
-        
-        // Check if the line contains one of the known reasons
-        // For a reason line, it should typically be just the reason without much else
-        return this.knownReasons.some(reason => 
-            cleanLine.includes(reason) && cleanLine.length < 20
+    extractLicenseEntries(textItems, pdfUrl) {
+        // First identify license numbers - they should be 4-digit numbers starting with 3 or 4
+        const licenseItems = textItems.filter(item => 
+            /^[3-4]\d{3}$/.test(item.str.trim())
         );
-    }
+        
+        // No licenses found
+        if (licenseItems.length === 0) {
+            return [];
+        }
 
-    /**
-     * Extract reason from text
-     * @param {string} text - Text to extract reason from
-     * @returns {string|null} Extracted reason or null
-     */
-    extractReason(text) {
-        // Clean the text of any RTL marks for comparison
-        const cleanText = text.replace(/[\u200F\u202B\u202E]/g, '').trim();
+        // Create a list of entries (one entry for each license)
+        const entries = [];
         
-        // Try to find an exact match first (more reliable)
-        for (const reason of this.knownReasons) {
-            // Look for exact reason (with possible word boundaries)
-            const exactPattern = new RegExp(`\\b${reason}\\b`);
-            if (exactPattern.test(cleanText)) {
-                return reason;
-            }
-        }
-        
-        // If no exact match, look for partial matches
-        for (const reason of this.knownReasons) {
-            if (cleanText.includes(reason)) {
-                return reason;
-            }
-        }
-        
-        return null;
-    }
-    
-    /**
-     * Enhanced method to extract details from a line of text
-     * @param {string} line - The line to process
-     * @param {object} permit - The permit object to update
-     */
-    extractDetailsFromLine(line, permit) {
-        // Extract date
-        const dateMatch = line.match(this.patterns.date);
-        if (dateMatch) {
-            try {
-                const [fullMatch, day, month, year] = dateMatch;
-                permit.licenseDate = `${day}/${month}/${year}`;
-            } catch (e) {
-                console.error('Error parsing date:', e);
-            }
-        }
-        
-        // Extract request type
-        if (line.includes('כריתה')) {
-            permit.requestType = 'כריתה'; // Cutting
-        } else if (line.includes('העתקה')) {
-            permit.requestType = 'העתקה'; // Transfer
-        }
-        
-        // Extract reason if not already set
-        if (!permit.reason) {
-            const extractedReason = this.extractReason(line);
-            if (extractedReason) {
-                permit.reason = extractedReason;
-            }
-        }
-        
-        // Split the line into parts
-        const parts = line.split(/\s+/);
-        
-        // Extract applicant - look for sequence of Hebrew words
-        const hebrewNamePattern = /^[\u0590-\u05FF\s"'.]+$/;
-        let applicantParts = [];
-        let inApplicant = false;
-        
-        for (let i = 0; i < parts.length; i++) {
-            const part = parts[i];
+        // Process each license
+        for (const licenseItem of licenseItems) {
+            const licenseNumber = licenseItem.str;
+            const licenseY = licenseItem.transform[5];
             
-            // Skip non-Hebrew parts until we find Hebrew
-            if (!inApplicant && !/[\u0590-\u05FF]/.test(part)) {
-                continue;
-            }
+            // Create a new entry object
+            const entry = {
+                licenseNumber: licenseNumber,
+                rawData: {}
+            };
             
-            // Check if this could be part of a name
-            if (/[\u0590-\u05FF]/.test(part) || part === 'בע"מ' || part === 'בעמ') {
-                inApplicant = true;
-                applicantParts.push(part);
-                continue;
-            }
+            // Find items in the same row as the license
+            const rowItems = textItems.filter(item => 
+                Math.abs(item.transform[5] - licenseY) < 10
+            );
             
-            // If we were in applicant mode but found non-Hebrew/non-name part
-            if (inApplicant) {
-                // If it's not a number or special character, end the applicant
-                if (!/^\d+$/.test(part) && !/^[.,"'-]+$/.test(part)) {
-                    break;
-                }
-            }
-        }
-        
-        if (applicantParts.length > 0) {
-            permit.applicant = applicantParts.join(' ');
-        }
-        
-        // Extract numbers that could be block, parcel, license number, and tree count
-        const numbers = parts.filter(part => /^\d+$/.test(part)).map(n => parseInt(n, 10));
-        
-        if (numbers.length >= 4) {
-            // In the example, the pattern appears to be:
-            // tree count, license number, date, block number, parcel number
-            
-            // Look for license number (4 digits)
-            const licenseIndex = numbers.findIndex(n => n >= 1000 && n <= 9999);
-            if (licenseIndex !== -1) {
-                permit.licenseNumber = numbers[licenseIndex];
-                
-                // Block and parcel are typically the last two numbers
-                if (licenseIndex < numbers.length - 2) {
-                    permit.blockNumber = numbers[numbers.length - 2];
-                    permit.parcelNumber = numbers[numbers.length - 1];
-                }
-                
-                // Tree count is typically a small number at the beginning
-                if (licenseIndex > 0) {
-                    permit.treeCount = numbers[0];
-                }
-            } else {
-                // Fallback to the original logic
-                permit.treeCount = numbers[0];
-                permit.blockNumber = numbers[numbers.length - 3];
-                permit.parcelNumber = numbers[numbers.length - 2];
-                permit.licenseNumber = numbers[numbers.length - 1];
-            }
-        } else if (numbers.length === 3) {
-            // If only 3 numbers, use contextual clues to identify them
-            const fourDigitIndex = numbers.findIndex(n => n >= 1000 && n <= 9999);
-            
-            if (fourDigitIndex !== -1) {
-                // The 4-digit number is likely the license number
-                permit.licenseNumber = numbers[fourDigitIndex];
-                
-                // Other numbers could be block/parcel or tree count
-                const remainingNumbers = numbers.filter((_, i) => i !== fourDigitIndex);
-                
-                if (remainingNumbers.length >= 2) {
-                    // Typically the larger number is the block
-                    if (remainingNumbers[0] > remainingNumbers[1]) {
-                        permit.blockNumber = remainingNumbers[0];
-                        permit.parcelNumber = remainingNumbers[1];
-                    } else {
-                        permit.blockNumber = remainingNumbers[1];
-                        permit.parcelNumber = remainingNumbers[0];
-                    }
-                }
-                
-                // If tree count is missing, assume 1
-                if (!permit.treeCount) {
-                    permit.treeCount = 1;
-                }
-            } else {
-                // No 4-digit number found, fall back to original logic
-                permit.treeCount = 1;
-                permit.blockNumber = numbers[0];
-                permit.parcelNumber = numbers[1];
-                permit.licenseNumber = numbers[2];
-            }
-        } else if (numbers.length > 0) {
-            // For cases with very few numbers
-            // If there's a 4-digit number, it's likely the license
-            const licenseCandidate = numbers.find(n => n >= 1000 && n <= 9999);
-            if (licenseCandidate) {
-                permit.licenseNumber = licenseCandidate;
-            }
-            
-            // If there's only one small number at the beginning, it's likely the tree count
-            if (numbers.length === 1 && numbers[0] < 100) {
-                permit.treeCount = numbers[0];
-            }
-        }
-    }
-
-    /**
-     * Process permits from lines of text
-     * @param {string[]} lines - The lines to process
-     * @param {number|null} defaultLicenseNumber - Default license number
-     * @returns {object[]} The processed permits
-     */
-    processPermits(lines, defaultLicenseNumber) {
-        const permits = [];
-        let currentPermit = {};
-        let currentAddress = null;
-        let currentTreeType = null;
-        let currentReason = null;
-            
-        // First pass: Identify all tree types and reasons in the document
-        const allTreeTypes = new Set();
-        const allReasons = new Set();
-        
-        for (const line of lines) {
-            // Clean line for analysis
-            const cleanLine = line.replace(/[\u200F\u202B\u202E]/g, '').trim();
-            
-            // Check for known tree species
-            for (const species of this.knownTreeSpecies) {
-                if (cleanLine.includes(species)) {
-                    allTreeTypes.add(species);
-                    break;
-                }
-            }
-            
-            // Extract any reason
-            const reason = this.extractReason(cleanLine);
-            if (reason) {
-                allReasons.add(reason);
-            }
-        }
-        
-        
-        // Second pass: Process lines to extract permits
-        for (let i = 0; i < lines.length; i++) {
-            // Clean line for analysis
-            const line = lines[i].replace(/[\u200F\u202B\u202E]/g, '').trim();
-            if (!line) continue;
-            
-            
-            // Detect if this is an address line
-            if (this.isAddressLine(line)) {
-                
-                // If we were building a permit, finalize it first
-                if (Object.keys(currentPermit).length > 0) {
-                    // Make sure the permit has at least address and tree type
-                    if (currentPermit.address && (currentPermit.treeType || currentTreeType)) {
-                        if (!currentPermit.treeType && currentTreeType) {
-                            currentPermit.treeType = currentTreeType;
-                        }
-                        if (!currentPermit.reason && currentReason) {
-                            currentPermit.reason = currentReason;
-                        }
-                        permits.push({...currentPermit});
-                    }
-                }
-                
-                // Start a new permit
-                currentAddress = line;
-                currentPermit = { address: line };
-                continue;
-            }
-            
-            // Detect tree type - check known species first
-            let foundTreeType = false;
-            for (const species of this.knownTreeSpecies) {
-                if (line.includes(species)) {
-                    currentTreeType = species;
-                    currentPermit.treeType = species;
-                    foundTreeType = true;
-                    break;
-                }
-            }
-            
-            // If no known species found, try the pattern
-            if (!foundTreeType && this.isTreeTypeLine(line)) {
-                currentTreeType = line;
-                currentPermit.treeType = line;
-                continue;
-            }
-            
-            // Detect reason
-            const extractedReason = this.extractReason(line);
-            if (extractedReason) {
-                currentReason = extractedReason;
-                currentPermit.reason = extractedReason;
-                continue;
-            }
-            
-            // Detect stand-alone license number
-            if (/^\d{4}$/.test(line)) {
-                currentPermit.licenseNumber = parseInt(line, 10);
-                continue;
-            }
-            
-            // Look for date and details line
-            const dateMatch = line.match(this.patterns.date);
-            if (dateMatch) {
-                this.extractDetailsFromLine(line, currentPermit);
-                
-                // After a full details line, the permit is complete
-                if (currentPermit.address) {
-                    if (!currentPermit.treeType && currentTreeType) {
-                        currentPermit.treeType = currentTreeType;
-                    }
-                    if (!currentPermit.reason && currentReason) {
-                        currentPermit.reason = currentReason;
-                    }
-                    if (!currentPermit.licenseNumber && defaultLicenseNumber) {
-                        currentPermit.licenseNumber = defaultLicenseNumber;
-                    }
-                    permits.push({...currentPermit});
-                }
-                
-                // Reset for next permit but keep the address if available
-                currentPermit = {};
-                if (currentAddress) {
-                    currentPermit.address = currentAddress;
-                }
-                continue;
-            }
-            
-            // Check if this line is part of a structured data table
-            // In the example, it appears that lines in the data table follow a pattern
-            const hasStructuredData = 
-                /\d/.test(line) && // Contains numbers
-                /[\u0590-\u05FF]/.test(line) && // Contains Hebrew
-                line.trim().split(/\s+/).length >= 3; // Has at least 3 words/tokens
-                
-            if (hasStructuredData) {
-                
-                // Extract tree type from line if not already set
-                if (!currentPermit.treeType) {
-                    for (const species of this.knownTreeSpecies) {
-                        if (line.includes(species)) {
-                            currentPermit.treeType = species;
-                            break;
-                        }
-                    }
-                }
-                
-                // Extract reason if not already set
-                if (!currentPermit.reason) {
-                    const reason = this.extractReason(line);
-                    if (reason) {
-                        currentPermit.reason = reason;
-                    }
-                }
-                
-                // Extract tree count if it looks like a number at the beginning
-                const treeCountMatch = line.match(/^\s*(\d+)\s/);
-                if (treeCountMatch && !currentPermit.treeCount) {
-                    currentPermit.treeCount = parseInt(treeCountMatch[1], 10);
-                }
-                
-                // Extract any other details
-                this.extractDetailsFromLine(line, currentPermit);
-            }
-        }
-        
-        // Add the last permit if not already added
-        if (Object.keys(currentPermit).length > 0 && currentPermit.address) {
-            if (!currentPermit.treeType && currentTreeType) {
-                currentPermit.treeType = currentTreeType;
-            }
-            if (!currentPermit.reason && currentReason) {
-                currentPermit.reason = currentReason;
-            }
-            permits.push({...currentPermit});
-        }
-        
-        return this.cleanupPermits(permits);
-    }
-    
-    /**
-     * Clean up permits by merging related ones and ensuring all fields are properly set
-     * @param {object[]} permits - The permits to clean up
-     * @returns {object[]} Cleaned up permits
-     */
-    cleanupPermits(permits) {
-        // Group permits by address
-        const addressGroups = {};
-        
-        for (const permit of permits) {
-            if (!permit.address) continue;
-            
-            if (!addressGroups[permit.address]) {
-                addressGroups[permit.address] = [];
-            }
-            addressGroups[permit.address].push(permit);
-        }
-        
-        // Merge permits for each address
-        const mergedPermits = [];
-        
-        for (const address in addressGroups) {
-            const addressPermits = addressGroups[address];
-            
-            // If there's only one permit for this address, add it directly
-            if (addressPermits.length === 1) {
-                mergedPermits.push(addressPermits[0]);
-                continue;
-            }
-            
-            // If there are multiple permits for the same address
-            // Group them by license number if available
-            const licenseGroups = {};
-            
-            for (const permit of addressPermits) {
-                const licenseKey = permit.licenseNumber ? permit.licenseNumber.toString() : 'unknown';
-                
-                if (!licenseGroups[licenseKey]) {
-                    licenseGroups[licenseKey] = [];
-                }
-                licenseGroups[licenseKey].push(permit);
-            }
-            
-            // For each license group, merge the permits
-            for (const licenseKey in licenseGroups) {
-                const licensePermits = licenseGroups[licenseKey];
-                
-                // If there's only one permit in this license group, add it directly
-                if (licensePermits.length === 1) {
-                    mergedPermits.push(licensePermits[0]);
+            // Process each column
+            for (const column of this.columnDefinitions) {
+                // Skip the license number column since we already have it
+                if (column.name === 'מס רישיון') {
+                    entry.rawData[column.name] = licenseNumber;
                     continue;
                 }
                 
-                // Merge multiple permits
-                const mergedPermit = { address };
+                // Find items in this row that fall within this column's boundaries
+                const columnItems = rowItems.filter(item => 
+                    item.transform[4] >= column.startX && item.transform[4] <= column.endX
+                );
                 
-                // Merge all properties, preferring non-empty values
-                for (const permit of licensePermits) {
-                    for (const key in permit) {
-                        if (key === 'address') continue; // Already set
-                        
-                        if (!mergedPermit[key] && permit[key]) {
-                            mergedPermit[key] = permit[key];
-                        }
+                // Sort from right to left for Hebrew text
+                columnItems.sort((a, b) => b.transform[4] - a.transform[4]);
+                
+                // Extract column value
+                if (columnItems.length > 0) {
+                    const value = columnItems.map(item => item.str).join(' ').trim();
+                    
+                    // Skip column headers and empty values
+                    if (value && !this.isColumnHeader(value)) {
+                        this.processColumnValue(entry, column.name, value);
                     }
                 }
-                
-                mergedPermits.push(mergedPermit);
+            }
+            
+            // Check for multi-line addresses
+            if (entry.address && entry.address.length > 15) {
+                const addressLines = this.findAdditionalAddressLines(entry.address, textItems, licenseItem, this.columnDefinitions[0]);
+                if (addressLines.length > 0) {
+                    entry.address = [entry.address, ...addressLines].join(' ');
+                    entry.rawData['כתובת'] = entry.address;
+                }
+            }
+            
+            // Add entry if it has enough data
+            if (Object.keys(entry.rawData).length > 1) {
+                // Transform to the TreePermit format
+                const transformedEntry = this.transformToTreePermit(entry, pdfUrl);
+                entries.push(transformedEntry);
             }
         }
         
-        return mergedPermits;
+        // Merge entries with the same license number
+        const mergedEntries = this.mergeEntriesWithSameLicense(entries);
+        
+        return mergedEntries;
     }
 
     /**
-     * Main entry point to parse a Petah Tikva PDF
-     * @param {string} rawText - The raw text from the PDF
-     * @param {number|null} defaultLicenseNumber - Default license number
-     * @returns {object} The parsed data
+     * Process a column value and add it to the entry object
+     * @param {Object} entry - Entry object to update
+     * @param {string} columnName - Column name
+     * @param {string} value - Column value
      */
-    async parsePetahTikvaPdf(rawText, defaultLicenseNumber = null) {
-        try {
-            if (!rawText) {
-                throw new Error('No text content to parse');
-            }
-
-            
-            // Preprocess the text to handle RTL properly
-            const processedText = this.preprocessText(rawText);
-            
-            
-            // Split the text into lines and filter empty lines
-            const lines = processedText.split('\n').map(line => line.trim()).filter(line => line);
-            
-            // Extract the header line with date range
-            let headerLine = null;
-            for (const line of lines) {
-                if (this.patterns.headerPattern.test(line)) {
-                    headerLine = line;
-                    break;
+    processColumnValue(entry, columnName, value) {
+        switch (columnName) {
+            case 'תאריך':
+                // Date column
+                const dateMatch = value.match(/\d{2}\/\d{2}\/\d{4}/);
+                if (dateMatch) {
+                    entry.date = dateMatch[0];
+                    entry.rawData[columnName] = entry.date;
+                } else {
+                    entry.rawData[columnName] = value;
                 }
-            }
-            
-            
-            // Find the table header line
-            let headerIndex = -1;
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i];
-                const cleanLine = line.replace(/[\u200F\u202B\u202E]/g, '');
+                break;
                 
-                if (
-                    cleanLine.includes(this.fieldMappings.addressField) || 
-                    cleanLine.includes(this.fieldMappings.treeTypeField) || 
-                    cleanLine.includes(this.fieldMappings.reasonField)
-                ) {
-                    headerIndex = i;
-                    break;
+            case 'שם המבקש':
+                // Applicant column
+                entry.applicant = value;
+                entry.rawData[columnName] = value;
+                break;
+                
+            case 'הסיבה':
+                // Reason column - clean up
+                let cleanedValue = value;
+                if (value.includes('כריתה')) {
+                    cleanedValue = 'כריתה';
                 }
-            }
-            
-            // If we couldn't find a header, use a reasonable default
-            if (headerIndex === -1) {
-                headerIndex = headerLine ? lines.indexOf(headerLine) + 2 : 0;
-            }
-            
-            
-            // Look for patterns in the data to validate field positions
-            // Based on the example provided, analyze column positions
-            const dataLines = lines.slice(headerIndex + 1);
-            
-            // Process permits
-            const permits = this.processPermits(dataLines, defaultLicenseNumber);
-            
-            
-            // Post-process permits to ensure all have proper reasons and tree types
-            const enhancedPermits = this.enhancePermitData(permits, dataLines);
-            
-            // Group permits by address
-            const permitsByAddress = {};
-            for (const permit of enhancedPermits) {
-                if (!permit.address) continue;
-                
-                if (!permitsByAddress[permit.address]) {
-                    permitsByAddress[permit.address] = [];
+                else if (value.includes('מחלת')) {
+                    cleanedValue = 'מחלת עץ';
                 }
-                permitsByAddress[permit.address].push(permit);
-            }
-            
-            // Add RTL mark to all Hebrew text fields for proper display
-            const finalPermits = enhancedPermits.map(permit => {
-                const rtlPermit = {...permit};
+                entry.reason = cleanedValue;
+                entry.rawData[columnName] = cleanedValue;
+                break;
                 
-                // Add RTL mark to Hebrew text fields (use RTL embedding for better display)
-                for (const key in rtlPermit) {
-                    if (typeof rtlPermit[key] === 'string' && /[\u0590-\u05FF]/.test(rtlPermit[key])) {
-                        rtlPermit[key] = '\u202B' + rtlPermit[key].replace(/[\u200F\u202B\u202E]/g, '');
-                    }
+            case 'הבקשה':
+                // Request type
+                entry.requestType = value;
+                entry.rawData[columnName] = value;
+                break;
+                
+            case 'כתובת':
+                // Address
+                entry.address = this.fixAddress(value);
+                entry.rawData[columnName] = entry.address;
+                break;
+                
+            case 'מס עצים':
+                // Tree count - extract digits
+                const matches = value.match(/\d+/);
+                if (matches && matches.length > 0) {
+                    entry['מס עצים'] = matches[0];
+                    entry.rawData[columnName] = entry['מס עצים'];
+                } else {
+                    entry['מס עצים'] = null;
+                    entry.rawData[columnName] = null;
                 }
+                break;
                 
-                return rtlPermit;
-            });
-            
-            return {
-                licenseNumber: defaultLicenseNumber,
-                headerInfo: headerLine ? '\u202B' + headerLine.replace(/[\u200F\u202B\u202E]/g, '') : null,
-                permits: finalPermits,
-                permitsByAddress: permitsByAddress
-            };
-            
-        } catch (error) {
-            console.error('Error parsing Petah-Tikva PDF:', error);
-            throw error;
+            case 'שם העץ':
+                // Tree type
+                entry.treeType = value;
+                entry.rawData[columnName] = value;
+                break;
+                
+            case 'גוש':
+                // Block number - usually 4 digits
+                const blockMatch = value.match(/\b\d{4}\b/);
+                if (blockMatch) {
+                    entry.block = blockMatch[0];
+                    entry.rawData[columnName] = entry.block;
+                } else {
+                    entry.block = value;
+                    entry.rawData[columnName] = value;
+                }
+                break;
+                
+            case 'חלקה':
+                // Parcel number
+                const parcelMatch = value.match(/\b\d+\b/);
+                if (parcelMatch) {
+                    entry.parcel = parcelMatch[0];
+                    entry.rawData[columnName] = entry.parcel;
+                } else {
+                    entry.parcel = value;
+                    entry.rawData[columnName] = value;
+                }
+                break;
+                
+            default:
+                // Any other column
+                entry[columnName] = value;
+                entry.rawData[columnName] = value;
+                break;
         }
     }
-    
+
     /**
-     * Enhanced post-processing of permit data to fix missing fields
-     * @param {Array} permits - The extracted permits
-     * @param {Array} dataLines - Original data lines for reference
-     * @returns {Array} Enhanced permits with all fields populated
+     * Find additional address lines in the text
+     * @param {string} primaryAddress - Primary address text
+     * @param {Array} allTextItems - All text items from the PDF
+     * @param {Object} licenseItem - License item with position
+     * @param {Object} addressColumn - Address column definition
+     * @returns {Array} Additional address lines
      */
-    enhancePermitData(permits, dataLines) {
-        const enhancedPermits = [];
+    findAdditionalAddressLines(primaryAddress, allTextItems, licenseItem, addressColumn) {
+        const licenseY = licenseItem.transform[5];
+        const additionalLines = [];
         
-        // Normalize and clean the data lines for comparison
-        const normalizedLines = dataLines.map(line => 
-            line.replace(/[\u200F\u202B\u202E]/g, '').trim()
+        // Look for items in the address column in the row below
+        const addressItems = allTextItems.filter(item => 
+            // In the address column
+            item.transform[4] >= addressColumn.startX && 
+            item.transform[4] <= addressColumn.endX &&
+            // Below the license row
+            item.transform[5] < licenseY &&
+            Math.abs(item.transform[5] - licenseY) < 25 && 
+            Math.abs(item.transform[5] - licenseY) > 10 && 
+            // Not already in the primary address
+            !primaryAddress.includes(item.str)
         );
         
-        // First, extract all tree types from the data for reference
-        const treeTypes = this.extractAllTreeTypes(normalizedLines);
-        
-        // Extract all reasons for reference
-        const reasons = this.extractAllReasons(normalizedLines);
-        
-        // Process each permit
-        for (const permit of permits) {
-            const enhancedPermit = {...permit};
+        if (addressItems.length > 0) {
+            // Sort by vertical position
+            addressItems.sort((a, b) => 
+                Math.abs(a.transform[5] - licenseY) - Math.abs(b.transform[5] - licenseY)
+            );
             
-            // If tree type is missing but we can find it by contextual clues, add it
-            if (!enhancedPermit.treeType || enhancedPermit.treeType === this.fieldMappings.treeTypeField) {
-                // Look for tree type in lines near this permit's address
-                if (enhancedPermit.address) {
-                    const addressIndex = normalizedLines.findIndex(line => 
-                        line.includes(enhancedPermit.address.replace(/[\u200F\u202B\u202E]/g, ''))
-                    );
-                    
-                    if (addressIndex !== -1) {
-                        // Look at the next few lines for a tree type
-                        for (let i = 1; i <= 3; i++) {
-                            if (addressIndex + i < normalizedLines.length) {
-                                const line = normalizedLines[addressIndex + i];
-                                
-                                // Check if this line might be a tree type
-                                const potentialTreeType = treeTypes.find(type => line.includes(type));
-                                if (potentialTreeType) {
-                                    enhancedPermit.treeType = potentialTreeType;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
+            // Get items from the closest row
+            const closestY = addressItems[0].transform[5];
+            const closestRowItems = addressItems.filter(item => 
+                Math.abs(item.transform[5] - closestY) < 5
+            );
+            
+            // Sort right to left
+            closestRowItems.sort((a, b) => b.transform[4] - a.transform[4]);
+            
+            const rowText = closestRowItems.map(item => item.str).join(' ').trim();
+            if (rowText && !this.isColumnHeader(rowText)) {
+                additionalLines.push(rowText);
             }
-            
-            // If reason is missing but can be found, add it
-            if (!enhancedPermit.reason) {
-                // Look for reason in the permit's address line (sometimes they're combined)
-                if (enhancedPermit.address) {
-                    const cleanAddress = enhancedPermit.address.replace(/[\u200F\u202B\u202E]/g, '');
-                    const foundReason = reasons.find(reason => cleanAddress.includes(reason));
-                    
-                    if (foundReason) {
-                        enhancedPermit.reason = foundReason;
-                    } else {
-                        // Look in nearby lines
-                        const addressIndex = normalizedLines.findIndex(line => 
-                            line.includes(cleanAddress)
-                        );
-                        
-                        if (addressIndex !== -1) {
-                            // Look at surrounding lines for a reason
-                            for (let i = -1; i <= 3; i++) {
-                                if (addressIndex + i >= 0 && addressIndex + i < normalizedLines.length) {
-                                    const line = normalizedLines[addressIndex + i];
-                                    
-                                    // Check for known reasons
-                                    const foundReason = this.extractReason(line);
-                                    if (foundReason) {
-                                        enhancedPermit.reason = foundReason;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // If tree count is missing, try to extract it
-            if (!enhancedPermit.treeCount) {
-                if (enhancedPermit.address) {
-                    const addressIndex = normalizedLines.findIndex(line => 
-                        line.includes(enhancedPermit.address.replace(/[\u200F\u202B\u202E]/g, ''))
-                    );
-                    
-                    if (addressIndex !== -1) {
-                        // In the example, tree count appears to be at the beginning of a row
-                        const line = normalizedLines[addressIndex];
-                        const treeCountMatch = line.match(/^\s*(\d+)\s/);
-                        
-                        if (treeCountMatch) {
-                            enhancedPermit.treeCount = parseInt(treeCountMatch[1], 10);
-                        }
-                    }
-                }
-            }
-            
-            enhancedPermits.push(enhancedPermit);
         }
         
-        return enhancedPermits;
+        return additionalLines;
     }
-    
+
     /**
-     * Extract all possible tree types from data
-     * @param {Array} lines - Data lines
-     * @returns {Array} List of tree types
+     * Check if a value is a column header
+     * @param {string} value - Value to check
+     * @returns {boolean} True if the value is a column header
      */
-    extractAllTreeTypes(lines) {
-        const treeTypes = new Set();
-        
-        for (const line of lines) {
-            // Skip lines that don't look like they might contain a tree type
-            if (!this.patterns.treeType.test(line)) continue;
-            
-            // Check if this line matches our tree type criteria
-            if (this.isTreeTypeLine(line)) {
-                treeTypes.add(line.trim());
-            }
-        }
-        
-        return Array.from(treeTypes);
+    isColumnHeader(value) {
+        const headers = ['כתובת', 'מס', 'עצים', 'שם העץ', 'הסיבה', 'הבקשה', 'מס רישיון', 'תאריך', 'שם המבקש', 'גוש', 'חלקה', 'רשימת רישיונות כריתה'];
+        return headers.includes(value.trim());
     }
-    
+
     /**
-     * Extract all possible reasons from data
-     * @param {Array} lines - Data lines
-     * @returns {Array} List of reasons
+     * Fix common address issues
+     * @param {string} address - Address to fix
+     * @returns {string} Fixed address
      */
-    extractAllReasons(lines) {
-        const reasons = new Set();
+    fixAddress(address) {
+        if (!address) return '';
         
-        for (const line of lines) {
-            const reason = this.extractReason(line);
-            if (reason) {
-                reasons.add(reason);
+        // Fix "הרכב ת" to "הרכבת"
+        if (address.includes('הרכב ת')) {
+            address = address.replace('הרכב ת', 'הרכבת');
+        }
+        
+        return address;
+    }
+
+    /**
+     * Extract street and house number from address
+     * @param {string} address - Address to extract from
+     * @returns {Object} Street and house number
+     */
+    extractAddressParts(address) {
+        if (!address) return { street: null, houseNumber: null };
+        
+        // Match a number at the end of the string or followed by a space
+        const numberMatch = address.match(/(\d+)($|\s)/);
+        
+        if (numberMatch) {
+            const houseNumber = numberMatch[1];
+            // Get everything before the house number
+            const street = address.substring(0, numberMatch.index).trim();
+            return { street, houseNumber };
+        } else {
+            // If no number found, return the entire address as street
+            return { street: address, houseNumber: null };
+        }
+    }
+
+    /**
+     * Transform to TreePermit object
+     * @param {Object} originalEntry - Original entry from PDF
+     * @param {string} pdfUrl - URL of the PDF
+     * @returns {TreePermit} Tree permit object
+     */
+    transformToTreePermit(originalEntry, pdfUrl) {
+        // Extract street and house number from address
+        const addressParts = this.extractAddressParts(originalEntry.address);
+        
+        // Create the tree notes array
+        const treeNotes = [{
+            name: originalEntry.treeType || null,
+            amount: originalEntry['מס עצים'] ? parseInt(originalEntry['מס עצים']) : null
+        }];
+        const resourceId = generateResourceId(originalEntry, addressParts);
+
+        // Create dates object for PermitDates
+        const permitDatesData = {
+            startDate: originalEntry.date || null,
+            endDate: originalEntry.date || null,
+            licenseDate: originalEntry.date || null,
+            printDate: originalEntry.date || null
+        };
+        
+        // Create TreePermit object
+        return new TreePermit({
+            permitNumber: originalEntry.licenseNumber || null,
+            licenseType: originalEntry.requestType || null,
+            address: addressParts.street || null,
+            houseNumber: addressParts.houseNumber || null,
+            settlement: "פתח תקווה",
+            gush: originalEntry.block || null,
+            helka: originalEntry.parcel || null,
+            reasonShort: originalEntry.reason || null,
+            reasonDetailed: null,
+            licenseOwnerName: originalEntry.applicant || null,
+            licenseOwnerId: null,
+            licenseIssuerName: null,
+            licenseIssuerRole: null,
+            licenseIssuerPhoneNumber: null,
+            licenseApproverName: null,
+            approverTitle: null,
+            licenseStatus: null,
+            originalRequestNumber: null,
+            forestPlotDetails: null,
+            treeNotes: treeNotes,
+            dates: permitDatesData,
+            resourceUrl: pdfUrl || null,
+            resourceId: resourceId
+        });
+    }
+
+    /**
+     * Merge entries with the same license number
+     * @param {Array} entries - Entries to merge
+     * @returns {Array} Merged entries
+     */
+    mergeEntriesWithSameLicense(entries) {
+        // Group entries by license number
+        const entriesByLicense = {};
+        
+        entries.forEach(entry => {
+            const licenseNumber = entry.permitNumber;
+            
+            if (!entriesByLicense[licenseNumber]) {
+                entriesByLicense[licenseNumber] = entry;
+            } else {
+                // For an existing license, merge the tree notes
+                const existingEntry = entriesByLicense[licenseNumber];
+                
+                // Add the current entry's tree to the existing entry's tree_notes array
+                if (entry.treeNotes && entry.treeNotes.length > 0) {
+                    const newTree = entry.treeNotes[0];
+                    if (newTree.name) {
+                        existingEntry.treeNotes.push(newTree);
+                    }
+                }
+            }
+        });
+        
+        // Convert the grouped entries back to an array
+        return Object.values(entriesByLicense);
+    }
+
+    /**
+     * Text-based parsing (fallback method)
+     * @param {string} rawText - Raw text from PDF
+     * @param {string} pdfUrl - URL of the PDF
+     * @returns {Array} Extracted license entries
+     */
+    extractLicenseEntriesFromText(rawText, pdfUrl) {
+        // Split the text into lines and remove empty ones
+        const lines = rawText.split('\n').filter(line => line.trim().length > 0);
+        
+        // Identify license numbers (4-digit numbers starting with 3 or 4)
+        const entries = [];
+        const licenseNumberRegex = /\b[3-4]\d{3}\b/;
+        
+        // Process each line to find license numbers
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const licenseMatch = line.match(licenseNumberRegex);
+            
+            if (licenseMatch) {
+                const licenseNumber = licenseMatch[0];
+                
+                // Create a new entry object
+                const entry = {
+                    licenseNumber: licenseNumber,
+                    rawData: {}
+                };
+                
+                // Set license number
+                entry.rawData['מס רישיון'] = licenseNumber;
+                
+                // Extract other data from the line and surrounding lines
+                this.extractDataForLicense(entry, line, i, lines);
+                
+                // Add entry if it has enough data
+                if (Object.keys(entry.rawData).length > 1) {
+                    // Transform to TreePermit object
+                    const transformedEntry = this.transformToTreePermit(entry, pdfUrl);
+                    entries.push(transformedEntry);
+                }
             }
         }
         
-        return Array.from(reasons);
+        // Merge entries with the same license number
+        const mergedEntries = this.mergeEntriesWithSameLicense(entries);
+        
+        return mergedEntries;
     }
+
+    /**
+     * Extract data for a license from text lines (fallback method)
+     * @param {Object} entry - License entry to populate
+     * @param {string} line - Current line with license number
+     * @param {number} lineIndex - Index of current line
+     * @param {Array} allLines - All text lines
+     */
+    extractDataForLicense(entry, line, lineIndex, allLines) {
+        // Extract date (looks like DD/MM/YYYY)
+        const dateRegex = /\d{2}\/\d{2}\/\d{4}/;
+        const dateMatch = line.match(dateRegex);
+        if (dateMatch) {
+            entry.date = dateMatch[0];
+            entry.rawData['תאריך'] = entry.date;
+        }
+        
+        // Remove license number for cleaner processing
+        let processedLine = line.replace(new RegExp('\\b' + entry.licenseNumber + '\\b'), '');
+        
+        // Extract request type (typically "כריתה" or "העתקה")
+        const requestTypes = ["כריתה", "העתקה", "גיזום"];
+        for (const type of requestTypes) {
+            if (processedLine.includes(type)) {
+                entry.requestType = type;
+                entry.rawData['הבקשה'] = type;
+                processedLine = processedLine.replace(type, '');
+                break;
+            }
+        }
+        
+        // Extract tree count (numeric values)
+        const treeCountMatch = processedLine.match(/\b\d+\b/);
+        if (treeCountMatch && !entry.date || (entry.date && !entry.date.includes(treeCountMatch[0]))) {
+            entry['מס עצים'] = treeCountMatch[0];
+            entry.rawData['מס עצים'] = entry['מס עצים'];
+            processedLine = processedLine.replace(treeCountMatch[0], '');
+        }
+        
+        // Extract address (look for Hebrew words and numbers)
+        const addressPattern = /[\u0590-\u05FF\s]+\d+|[\u0590-\u05FF\s]+/;
+        const addressMatch = processedLine.match(addressPattern);
+        if (addressMatch) {
+            const possibleAddress = addressMatch[0].trim();
+            // Ensure it's not just the license number or a very short string
+            if (possibleAddress.length > 2 && !possibleAddress.includes(entry.licenseNumber)) {
+                entry.address = this.fixAddress(possibleAddress);
+                entry.rawData['כתובת'] = entry.address;
+                processedLine = processedLine.replace(possibleAddress, '');
+            }
+        }
+        
+        // Look for additional address info in surrounding lines
+        if (!entry.address || entry.address.length < 10) {
+            // Look at the previous and next lines for address information
+            const surroundingLines = [];
+            if (lineIndex > 0) surroundingLines.push(allLines[lineIndex - 1]);
+            if (lineIndex < allLines.length - 1) surroundingLines.push(allLines[lineIndex + 1]);
+            
+            for (const surroundingLine of surroundingLines) {
+                const surAddressMatch = surroundingLine.match(addressPattern);
+                if (surAddressMatch && !surroundingLine.match(/\b[3-4]\d{3}\b/)) {
+                    const additionalAddress = surAddressMatch[0].trim();
+                    if (additionalAddress.length > 5) {
+                        if (!entry.address) {
+                            entry.address = this.fixAddress(additionalAddress);
+                            entry.rawData['כתובת'] = entry.address;
+                        } else {
+                            entry.address = `${entry.address} ${this.fixAddress(additionalAddress)}`;
+                            entry.rawData['כתובת'] = entry.address;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Look for tree species names
+        const treeSpeciesPattern = /אורן|ברוש|אקליפטוס|תמר|דקל|זית|אלון|פיקוס|ושינגטוניה|איקליפטוס/;
+        const treeSpeciesMatch = processedLine.match(treeSpeciesPattern);
+        if (treeSpeciesMatch) {
+            // Get the tree species and potentially a word or two around it
+            const startIndex = Math.max(0, processedLine.indexOf(treeSpeciesMatch[0]) - 10);
+            const endIndex = Math.min(processedLine.length, processedLine.indexOf(treeSpeciesMatch[0]) + treeSpeciesMatch[0].length + 10);
+            const treeContext = processedLine.substring(startIndex, endIndex);
+            
+            // Extract the tree name and any Hebrew words directly connected to it
+            const treeNameMatch = treeContext.match(/[\u0590-\u05FF\s]+/);
+            if (treeNameMatch) {
+                entry.treeType = treeNameMatch[0].trim();
+                entry.rawData['שם העץ'] = entry.treeType;
+                processedLine = processedLine.replace(treeSpeciesMatch[0], '');
+            }
+        }
+        
+        // Extract reason (common reason phrases)
+        const reasonPatterns = [/בטיחות/, /מחלה/, /מסוכן/, /בניה/, /פיתוח/, /תשתית/];
+        for (const pattern of reasonPatterns) {
+            const reasonMatch = processedLine.match(pattern);
+            if (reasonMatch) {
+                // Get some context around the reason
+                const startIndex = Math.max(0, processedLine.indexOf(reasonMatch[0]) - 5);
+                const endIndex = Math.min(processedLine.length, processedLine.indexOf(reasonMatch[0]) + reasonMatch[0].length + 15);
+                const reasonContext = processedLine.substring(startIndex, endIndex);
+                
+                entry.reason = reasonContext.trim();
+                entry.rawData['הסיבה'] = entry.reason;
+                processedLine = processedLine.replace(pattern, '');
+                break;
+            }
+        }
+        
+        // Extract block and parcel
+        const blockPattern = /\b\d{4}\b/;  // Block is usually a 4-digit number
+        const blockMatch = line.match(blockPattern);
+        if (blockMatch && blockMatch[0] !== entry.licenseNumber) {
+            entry.block = blockMatch[0];
+            entry.rawData['גוש'] = entry.block;
+        }
+        
+        // Check for parcel after removing other known numbers
+        let lineWithoutKnownNumbers = line
+            .replace(new RegExp('\\b' + entry.licenseNumber + '\\b'), '')
+            .replace(dateRegex, '')
+            .replace(/\b\d{4}\b/, ''); // Remove block numbers
+        
+        const parcelPattern = /\b\d{1,3}\b/; // Parcel is usually a 1-3 digit number
+        const parcelMatch = lineWithoutKnownNumbers.match(parcelPattern);
+        if (parcelMatch) {
+            entry.parcel = parcelMatch[0];
+            entry.rawData['חלקה'] = entry.parcel;
+        }
+    }
+}
+
+function generateResourceId(originalEntry, addressParts) {
+    const parts = [];
+
+    // Most reliable: always include permitNumber
+    const permitNumber = originalEntry.licenseNumber;
+    if (!permitNumber) {
+        throw new Error("Cannot generate resourceId: missing permitNumber");
+    }
+    parts.push(`permit-${permitNumber}`);
+
+    // Add optional parts for extra uniqueness
+    if (addressParts?.houseNumber) {
+        parts.push(`house-${addressParts.houseNumber}`);
+    }
+
+    if (addressParts?.street) {
+        parts.push(`street-${addressParts.street.replace(/\s+/g, '-')}`);
+    }
+
+    if (originalEntry.block) {
+        parts.push(`gush-${originalEntry.block}`);
+    }
+
+    if (originalEntry.parcel) {
+        parts.push(`helka-${originalEntry.parcel}`);
+    }
+
+    return parts.join('_').toLowerCase();
 }
 
 module.exports = { PetahTikvaPdfParser };

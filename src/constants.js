@@ -24,6 +24,10 @@ const constants = {
     ASHDOD_OUTPUT_DIR: './output/ashdod',
     ASHDOD_TEMP_DIR: './temp/ashdod',
     ASHDOD_BATCH_SIZE: 5,
+    NETANYA_EXCEL_URL: 'https://www.netanya.muni.il/Documents/%D7%98%D7%A4%D7%A1%D7%99%D7%9D%20%D7%A9%D7%99%D7%9E%D7%95%D7%A9%D7%99%D7%99%D7%9D/%D7%90%D7%99%D7%9B%D7%95%D7%AA%20%D7%94%D7%A1%D7%91%D7%99%D7%91%D7%94/MAAKAV1.xlsx',
+    NETANYA_OUTPUT_DIR: './output/netanya',
+    NETANYA_TEMP_DIR: './temp/netanya',
+    NETANYA_BATCH_SIZE: 10,
     QUERY_CONSTANTS : {
         MAX_PAGE_SIZE: 50,
         DEFAULT_PAGE: 1,
