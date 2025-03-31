@@ -4,7 +4,13 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "nodemon --ignore ./temp/ index.js"
+  },
+  "nodemonConfig": {
+    "ignore": [
+      "temp/*"
+    ]
   },
   "keywords": [],
   "author": "",
@@ -13,11 +19,16 @@
     "@google-cloud/datastore": "^9.2.1",
     "axios": "^1.7.9",
     "cheerio": "^1.0.0",
+    "cors": "^2.8.5",
     "express": "^4.21.2",
     "fs": "^0.0.1-security",
     "iconv-lite": "^0.6.3",
+    "nodemon": "^3.1.9",
     "path": "^0.12.7",
-    "pdf-parse": "^1.1.1"
+    "pdf-parse": "^1.1.1",
+    "pdfjs-dist": "^5.0.375",
+    "puppeteer": "^24.3.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "eslint": "^9.17.0",

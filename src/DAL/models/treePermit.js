@@ -23,7 +23,7 @@ class TreePermit {
         forestPlotDetails,
         treeNotes,
         dates,
-        pdfUrl,
+        resourceUrl,
         resourceId
     }) {
         this.permitNumber = permitNumber;
@@ -47,7 +47,7 @@ class TreePermit {
         this.forestPlotDetails = forestPlotDetails;
         this.treeNotes = treeNotes;
         this.dates = dates instanceof PermitDates ? dates : new PermitDates(dates);
-        this.pdfUrl = pdfUrl;
+        this.resourceUrl = resourceUrl;
         this.resourceId = resourceId;
     }
 }

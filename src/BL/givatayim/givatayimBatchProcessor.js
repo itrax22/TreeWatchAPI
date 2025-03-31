@@ -1,15 +1,17 @@
 const {fieldMappings, replaceHebrewKeysWithEnglish, mappedToEnglish} = require('../../config/pdfFieldMappings');
-const {mapToTreePermitModel} = require('./mappers/dalMapper');
+const {mapToTreePermitModelWithCity} = require('./givatayimDalMapper');
 const fs = require('fs').promises;
 const TreePermit = require('../../DAL/models/treePermit');
 const TreePermitRepository = require('../../DAL/repositories/treePermitRepository');
 
-class RechovotBatchProcessor {
-    constructor(pdfDownloader, fileManager, pdfParser, batchSize) {
+class GivatayimBatchProcessor {
+    constructor(pdfDownloader, fileManager, pdfParser, batchSize, isProduction = true) {
         this.pdfDownloader = pdfDownloader;
         this.fileManager = fileManager;
         this.pdfParser = pdfParser;
         this.batchSize = batchSize;
+        this.cityCode = 'GIVT'; // City code for Givatayim
+        this.isProduction = isProduction;
     }
 
     createBatches(items) {
@@ -23,16 +25,17 @@ class RechovotBatchProcessor {
     async processBatch(batch) {
         const batchResults = [];
         const errors = [];
+        const skippedDueToDate = [];
 
         for (const item of batch) {
-            const result = await this._processItem(item, errors);
+            const result = await this._processItem(item, errors, skippedDueToDate);
             batchResults.push(result);
         }
 
-        return { results: batchResults, errors };
+        return { results: batchResults, errors, skippedDueToDate };
     }
 
-    async _processItem(pdf, errors) {
+    async _processItem(pdf, errors, skippedDueToDate) {
         const tempFilePath = this.fileManager.getTempFilePath(pdf.filename);
         
         try {
@@ -44,22 +47,38 @@ class RechovotBatchProcessor {
             }
 
             const { jsonData, rawText } = await this._parsePdfContent(pdf, tempFilePath, errors);
-            //Fix to download if the link is broken in some cases
+            
+            // Combine PDF metadata with extracted content
             const combinedData = {
                 ...pdf,
-                resourceData: {...jsonData}
+                resourceData: {...jsonData},
+                city: 'גבעתיים' // Add city information
             };
 
-            const mappedData = mapToTreePermitModel(combinedData);
-        const treePermitInstance = new TreePermit(mappedData);
+            // Map to the TreePermit model format with city information
+            const mappedData = mapToTreePermitModelWithCity(combinedData, this.cityCode);
+            const treePermitInstance = new TreePermit(mappedData);
 
-            await TreePermitRepository.insert(treePermitInstance);
+            // Check if we should insert based on licenseDate when in production mode
+            const shouldInsert = this._shouldInsertBasedOnDate(treePermitInstance);
+            
+            if (shouldInsert) {
+                // Insert into the database
+                await TreePermitRepository.insert(treePermitInstance);
+            } else {
+                skippedDueToDate.push({
+                    filename: pdf.filename,
+                    licenseDate: treePermitInstance.dates?.licenseDate
+                });
+            }
 
             return {
                 filename: pdf.filename,
                 success: true,
                 hasJson: !!jsonData,
                 hasText: !!rawText,
+                inserted: shouldInsert,
+                licenseDate: treePermitInstance.dates?.licenseDate,
                 errors: errors.filter(e => e.filename === pdf.filename)
             };
 
@@ -73,6 +92,27 @@ class RechovotBatchProcessor {
         } finally {
             await this._cleanup(tempFilePath);
         }
+    }
+
+    _shouldInsertBasedOnDate(treePermit) {
+        // If not in production mode, always insert
+        if (!this.isProduction) {
+            return true;
+        }
+
+        // In production mode, check if licenseDate is within the last 60 days
+        if (!treePermit.dates || !treePermit.dates.licenseDate) {
+            console.warn(`Missing licenseDate for permit ${treePermit.filename}, skipping in production mode`);
+            return false;
+        }
+
+        const licenseDate = new Date(treePermit.dates.licenseDate);
+        const now = new Date();
+        const sixtyDaysAgo = new Date();
+        sixtyDaysAgo.setDate(now.getDate() - 60);
+
+        // Only insert if license date is within the last 60 days
+        return licenseDate >= sixtyDaysAgo;
     }
 
     async _parsePdfContent(pdf, tempFilePath, errors) {
@@ -97,19 +137,6 @@ class RechovotBatchProcessor {
         return { jsonData, rawText };
     }
 
-    async _saveResults(pdf, jsonData, rawText, errors) {
-        try {
-            await this.fileManager.saveOutputs(pdf.filename, jsonData, rawText, {
-                address: pdf.address,
-                licenseType: pdf.licenseType,
-                date: pdf.date,
-                pdfUrl: pdf.pdfUrl
-            });
-        } catch (saveError) {
-            this._logError(errors, pdf.filename, 'saving', saveError);
-        }
-    }
-
     _logError(errors, filename, stage, error) {
         console.warn(`Error in ${stage} for ${filename}:`, error.message);
         errors.push({
@@ -128,5 +155,4 @@ class RechovotBatchProcessor {
     }
 }
 
-
-module.exports = {RechovotBatchProcessor};
+module.exports = { GivatayimBatchProcessor };

@@ -3,20 +3,118 @@ output "datastore_enabled" {
   value       = "Google Datastore API is enabled for project ${var.project_id}"
 }
 
-output "tree_permit_index" {
+output "tree_permit_indexes" {
   description = "Details of the TreePermit kind's configured indexes"
   value = {
-    kind      = google_datastore_index.tree_permit_index.kind
-    ancestor  = google_datastore_index.tree_permit_index.ancestor
-    properties = [
-      for property in google_datastore_index.tree_permit_index.properties :
-      {
-        name      = property.name
-        direction = property.direction
-      }
-    ]
+    "settlement_license_date" = {
+      kind      = google_datastore_index.tree_permit_settlement_license_date.kind
+      properties = [
+        for property in google_datastore_index.tree_permit_settlement_license_date.properties :
+        {
+          name      = property.name
+          direction = property.direction
+        }
+      ]
+    },
+    "reasonShort_license_date" = {
+      kind      = google_datastore_index.tree_permit_reasonShort_license_date.kind
+      properties = [
+        for property in google_datastore_index.tree_permit_reasonShort_license_date.properties :
+        {
+          name      = property.name
+          direction = property.direction
+        }
+      ]
+    },
+    "licenseType_license_date" = {
+      kind      = google_datastore_index.tree_permit_licenseType_license_date.kind
+      properties = [
+        for property in google_datastore_index.tree_permit_licenseType_license_date.properties :
+        {
+          name      = property.name
+          direction = property.direction
+        }
+      ]
+    },
+    "lastDateToObject_filter_sort" = {
+      kind      = google_datastore_index.tree_permit_last_date_filter_sort.kind
+      properties = [
+        for property in google_datastore_index.tree_permit_last_date_filter_sort.properties :
+        {
+          name      = property.name
+          direction = property.direction
+        }
+      ]
+    },
+    "created_at_sort" = {
+      kind      = google_datastore_index.tree_permit_created_at_sort.kind
+      properties = [
+        for property in google_datastore_index.tree_permit_created_at_sort.properties :
+        {
+          name      = property.name
+          direction = property.direction
+        }
+      ]
+    },
+    "settlement_sort" = {
+      kind      = google_datastore_index.tree_permit_settlement_sort.kind
+      properties = [
+        for property in google_datastore_index.tree_permit_settlement_sort.properties :
+        {
+          name      = property.name
+          direction = property.direction
+        }
+      ]
+    },
+    "license_date_sort" = {
+      kind      = google_datastore_index.tree_permit_license_date_sort.kind
+      properties = [
+        for property in google_datastore_index.tree_permit_license_date_sort.properties :
+        {
+          name      = property.name
+          direction = property.direction
+        }
+      ]
+    }
   }
 }
+
+output "health_check_indexes" {
+  description = "Details of the HealthCheck kind's configured indexes"
+  value = {
+    "job_name_start_time" = {
+      kind      = google_datastore_index.health_check_job_name_start_time.kind
+      properties = [
+        for property in google_datastore_index.health_check_job_name_start_time.properties :
+        {
+          name      = property.name
+          direction = property.direction
+        }
+      ]
+    },
+    "status_start_time" = {
+      kind      = google_datastore_index.health_check_status_start_time.kind
+      properties = [
+        for property in google_datastore_index.health_check_status_start_time.properties :
+        {
+          name      = property.name
+          direction = property.direction
+        }
+      ]
+    },
+    "job_name_status_start_time" = {
+      kind      = google_datastore_index.health_check_job_name_status_start_time.kind
+      properties = [
+        for property in google_datastore_index.health_check_job_name_status_start_time.properties :
+        {
+          name      = property.name
+          direction = property.direction
+        }
+      ]
+    }
+  }
+}
+
 
 output "api_gateway_url" {
   value       = google_api_gateway_gateway.tree_permit_gateway.default_hostname
